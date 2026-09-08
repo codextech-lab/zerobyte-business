@@ -24,6 +24,14 @@ function isAdminEmail(email: string) {
   return adminEmails.includes(email.trim().toLowerCase())
 }
 
+function Skeleton({ className = '' }: { className?: string }) {
+  return <span className={`skeleton ${className}`} aria-hidden="true" />
+}
+
+function WorkspaceSkeleton() {
+  return <div className="workspace-skeleton" aria-label="Loading workspace"><aside className="skeleton-sidebar"><Skeleton className="skeleton-logo" /><Skeleton className="skeleton-block" /><Skeleton className="skeleton-block" /><Skeleton className="skeleton-block" /><Skeleton className="skeleton-block" /></aside><main className="skeleton-main"><Skeleton className="skeleton-heading" /><div className="skeleton-metrics">{[1, 2, 3, 4].map((item) => <Skeleton key={item} className="skeleton-card" />)}</div><Skeleton className="skeleton-chart" /><div className="skeleton-columns"><Skeleton className="skeleton-panel" /><Skeleton className="skeleton-panel" /></div></main></div>
+}
+
 function App() {
   const [sessionReady, setSessionReady] = useState(false); const [signedIn, setSignedIn] = useState(false); const [email, setEmail] = useState(''); const [displayName, setDisplayName] = useState('')
   const isAdminPath = (pathname: string) => pathname === '/admin' || pathname.endsWith('/admin') || pathname.endsWith('/admin.html')
@@ -69,7 +77,7 @@ function App() {
     return () => data.subscription.unsubscribe()
   }, [])
 
-  if (!sessionReady) return <div className="auth-loading">Loading Zerøbyte Business…</div>
+  if (!sessionReady) return <WorkspaceSkeleton />
   if (path === '/terms' || path === '/privacy' || path === '/cookies') return <LegalPage type={path.slice(1) as 'terms' | 'privacy' | 'cookies'} />
   if (!isSupabaseConfigured) return <ConfigurationRequired />
   if (path === '/admin') {
@@ -229,7 +237,7 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     { label: 'Platform revenue', key: undefined, value: 'Unavailable', detail: 'Revenue data will appear here once billing is enabled.' },
   ]
   const renderRows = () => {
-    if (rowsLoading) return <div className="admin-empty">Loading {section.toLowerCase()}…</div>
+    if (rowsLoading) return <div className="admin-table-skeleton">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="admin-skeleton-row"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>)}</div>
     if (rowsError) return <div className="form-error" role="alert">{rowsError}</div>
     if (!rows.length) return <div className="admin-empty">No {section.toLowerCase()} records found.</div>
     const columns = Object.keys(rows[0]).filter((key) => !['metadata', 'features'].includes(key)).slice(0, 7)
@@ -257,8 +265,12 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     setRows((current) => [{ title: notificationTitle, message: notificationMessage, status: 'sent', created_at: new Date().toISOString() }, ...current])
   }
   const renderSection = () => {
-    if (section === 'Overview') return <><div className="admin-grid">{stats.map((stat) => <article key={stat.label} className="admin-card"><div className="admin-card-label">{stat.label}</div><div className="admin-card-value">{stat.value ?? (overview ? (overview[stat.key ?? ''] ?? 0).toLocaleString() : 'Loading…')}</div><p>{stat.detail}</p></article>)}</div><section className="admin-card wide"><div className="admin-card-header"><div><h2>Platform monitoring</h2><p>{overview ? 'Live counts from the shared Supabase backend.' : 'Loading platform records from Supabase.'}</p></div><span className="admin-pill success">{overview ? 'Live data' : 'Connecting'}</span></div><div className="admin-list">{['Users', 'Organizations', 'Branches', 'Inventory', 'Sales', 'Notifications'].map((name) => <div key={name} className="admin-list-item"><div><strong>{name}</strong><p>Open the live administrative view for {name.toLowerCase()}.</p></div><button className="text-btn" onClick={() => setSection(name as AdminSection)}>Open</button></div>)}</div></section></>
-    if (section === 'Users') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Users</h2><p>Platform accounts loaded through the protected Auth listing Edge Function.</p></div><span className="admin-pill success">Secure live view</span></div>{userRowsLoading ? <div className="admin-empty">Loading users…</div> : userRowsError ? <div className="form-error" role="alert">{userRowsError}. Deploy list-platform-users and refresh.</div> : !userRows.length ? <div className="admin-empty">No users found.</div> : <div className="table-wrap"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Created</th><th>Last sign in</th></tr></thead><tbody>{userRows.map((row) => <tr key={String(row.id)}><td>{String(row.name ?? '—')}</td><td>{String(row.email ?? '—')}</td><td>{String(row.phone ?? '—')}</td><td>{String(row.status ?? '—')}</td><td>{String(row.created_at ?? '—')}</td><td>{String(row.last_sign_in_at ?? 'Never')}</td></tr>)}</tbody></table></div>}</section>
+    if (section === 'Overview') {
+      const chartItems = stats.filter((stat) => stat.key).slice(0, 7)
+      const maxValue = Math.max(...chartItems.map((stat) => overview?.[stat.key ?? ''] ?? 0), 1)
+      return <>{overview ? <div className="admin-grid">{stats.map((stat) => <article key={stat.label} className="admin-card"><div className="admin-card-label">{stat.label}</div><div className="admin-card-value">{stat.value ?? (overview[stat.key ?? ''] ?? 0).toLocaleString()}</div><p>{stat.detail}</p></article>)}</div> : <div className="admin-grid">{[1, 2, 3, 4].map((item) => <article key={item} className="admin-card admin-card-skeleton"><Skeleton className="skeleton-line short" /><Skeleton className="skeleton-line value" /><Skeleton className="skeleton-line" /></article>)}</div>}<div className="admin-overview-columns"><section className="admin-card admin-chart-card"><div className="admin-card-header"><div><h2>Platform footprint</h2><p>Current records by operational area.</p></div><span className="admin-pill success">{overview ? 'Live data' : 'Connecting'}</span></div>{overview ? <div className="admin-bar-chart">{chartItems.map((stat) => <div className="admin-bar-item" key={stat.label}><div className="admin-bar-track"><i style={{ height: `${Math.max(6, ((overview[stat.key ?? ''] ?? 0) / maxValue) * 100)}%` }} /></div><strong>{(overview[stat.key ?? ''] ?? 0).toLocaleString()}</strong><small>{stat.label}</small></div>)}</div> : <div className="admin-chart-skeleton"><Skeleton /><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>}</section><section className="admin-card admin-brief-card"><div className="admin-card-header"><div><h2>Platform monitoring</h2><p>{overview ? 'Live counts from the shared Supabase backend.' : 'Preparing the platform overview.'}</p></div></div><div className="admin-list">{['Users', 'Organizations', 'Branches', 'Inventory', 'Sales', 'Notifications'].map((name) => <div key={name} className="admin-list-item"><div><strong>{name}</strong><p>Open the live administrative view.</p></div><button className="text-btn" onClick={() => setSection(name as AdminSection)}>Open</button></div>)}</div></section></div></>
+    }
+    if (section === 'Users') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Users</h2><p>Platform accounts loaded through the protected Auth listing Edge Function.</p></div><span className="admin-pill success">Secure live view</span></div>{userRowsLoading ? <div className="admin-table-skeleton">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="admin-skeleton-row"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>)}</div> : userRowsError ? <div className="form-error" role="alert">{userRowsError}. Deploy list-platform-users and refresh.</div> : !userRows.length ? <div className="admin-empty">No users found.</div> : <div className="table-wrap"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Created</th><th>Last sign in</th></tr></thead><tbody>{userRows.map((row) => <tr key={String(row.id)}><td>{String(row.name ?? '—')}</td><td>{String(row.email ?? '—')}</td><td>{String(row.phone ?? '—')}</td><td>{String(row.status ?? '—')}</td><td>{String(row.created_at ?? '—')}</td><td>{String(row.last_sign_in_at ?? 'Never')}</td></tr>)}</tbody></table></div>}</section>
     if (section === 'Settings') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Admin settings</h2><p>Profile and environment-safe controls for this console.</p></div></div><div className="admin-settings"><div><span className="admin-card-label">Signed-in account</span><strong>{email}</strong></div><div><span className="admin-card-label">Access model</span><strong>Platform admin role + Supabase RLS</strong></div><div><span className="admin-card-label">Revenue</span><strong>Unavailable until billing is implemented</strong></div></div></section>
     if (section === 'Notifications') return <><section className="admin-card wide"><div className="admin-card-header"><div><h2>Send broadcast</h2><p>Creates an audited admin notification record. Fan-out to user notifications requires the server-side delivery function.</p></div></div><form className="admin-form" onSubmit={sendNotification}><label>Title<input required value={notificationTitle} onChange={(event) => setNotificationTitle(event.target.value)} placeholder="Scheduled maintenance" /></label><label>Message<textarea required value={notificationMessage} onChange={(event) => setNotificationMessage(event.target.value)} placeholder="Write the message users should receive." /></label><button className="primary" type="submit">Save broadcast</button>{notificationStatus && <p className="muted" role="status">{notificationStatus}</p>}</form></section><section className="admin-card wide"><div className="admin-card-header"><div><h2>Notification history</h2><p>Records from the shared admin notification table.</p></div></div>{renderRows()}</section></>
     return <section className="admin-card wide"><div className="admin-card-header"><div><h2>{section}</h2><p>Live records from the shared Supabase backend.</p></div><button className="secondary" onClick={() => setSection('Overview')}>Back to overview</button></div>{renderRows()}</section>
@@ -314,7 +326,7 @@ function Workspace({ email, displayName }: { email: string; displayName: string 
   }, [])
   const workerMode = role === 'member'
   useEffect(() => { if (workerMode && ['Inventory', 'Expenses', 'Invoices', 'Reports', 'Branches', 'Workforce', 'Settings'].includes(view)) setView('Overview') }, [workerMode, view])
-  if (loading) return <div className="auth-loading">Loading your workspace…</div>
+  if (loading) return <WorkspaceSkeleton />
   if (!orgId) return <WorkspaceSetup email={email} onCreated={(id, name) => { setOrgId(id); setOrgName(name) }} />
   const switchOrganization = (nextId: string) => {
     const next = organizations.find((organization) => organization.id === nextId)
