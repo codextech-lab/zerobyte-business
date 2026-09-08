@@ -2,14 +2,14 @@
   "name": "Zerøbyte Business",
   "short_name": "Zerøbyte",
   "description": "A calm operating workspace for Nigerian businesses.",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#07111d",
   "theme_color": "#0d1117",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
