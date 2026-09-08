@@ -26,7 +26,8 @@ function isAdminEmail(email: string) {
 
 function App() {
   const [sessionReady, setSessionReady] = useState(false); const [signedIn, setSignedIn] = useState(false); const [email, setEmail] = useState(''); const [displayName, setDisplayName] = useState('')
-  const adminEntry = window.location.pathname === '/admin' || window.location.pathname === '/admin.html'
+  const isAdminPath = (pathname: string) => pathname === '/admin' || pathname.endsWith('/admin') || pathname.endsWith('/admin.html')
+  const adminEntry = isAdminPath(window.location.pathname)
   const [path, setPath] = useState(adminEntry ? '/admin' : window.location.pathname)
 
   const navigate = (nextPath: string) => {
@@ -35,7 +36,7 @@ function App() {
   }
 
   useEffect(() => {
-    const onPopState = () => setPath(window.location.pathname === '/admin.html' ? '/admin' : window.location.pathname)
+    const onPopState = () => setPath(isAdminPath(window.location.pathname) ? '/admin' : window.location.pathname)
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
@@ -48,7 +49,7 @@ function App() {
       if (hasSession && window.location.pathname === '/auth') {
         navigate('/')
       }
-      if (hasSession && window.location.pathname === '/admin' && !isAdminEmail(data.session?.user.email ?? '')) {
+      if (hasSession && isAdminPath(window.location.pathname) && !isAdminEmail(data.session?.user.email ?? '')) {
         setPath('/admin')
       }
       setSessionReady(true)
@@ -60,7 +61,7 @@ function App() {
         if (window.location.pathname === '/auth') {
           navigate('/')
         }
-        if (window.location.pathname === '/admin' && !isAdminEmail(session?.user.email ?? '')) {
+        if (isAdminPath(window.location.pathname) && !isAdminEmail(session?.user.email ?? '')) {
           setPath('/admin')
         }
       }
@@ -140,7 +141,7 @@ function AdminLogin({ onBack }: { onBack: () => void }) {
       return;
     }
     window.localStorage.setItem('zerobyte.admin-access', 'true');
-    window.location.href = '/admin';
+    window.location.href = `${window.location.pathname.endsWith('/admin.html') ? './admin.html' : './admin'}`;
   }
 
   return <div className="auth-shell"><button className="back-link" onClick={onBack}>← Back to Zerøbyte</button><div className="auth-brand"><div className="brand-mark">ø</div><strong>Zerøbyte</strong><span>Admin Console</span></div><div className="auth-layout"><section className="auth-intro"><span className="auth-kicker">Platform operations</span><h1>Platform access<br /><em>restricted to approved admins.</em></h1><p>Only verified platform administrators can access the admin console. Business ownership, worker roles, and organization membership do not grant platform access.</p></section><form className="auth-card" onSubmit={handleSubmit}><span className="auth-kicker">Secure sign-in</span><h2>Admin login</h2><label>Email address<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@zerobyte.app" /></label><label>Password<input type="password" required minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary entry-button" disabled={loading}>{loading ? 'Authenticating…' : 'Enter admin console'}</button></form></div></div>
