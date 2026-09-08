@@ -37,6 +37,13 @@ The repository includes a dedicated `admin.html` application entry plus the prot
 
 For separate hosting, deploy the same production output to two sites: configure the user site to serve `index.html` and the admin site to serve `admin.html`. Both sites share the same Supabase project, while the admin site remains protected by the server-side platform-admin checks used by the Edge Functions and database RPCs.
 
+The included GitHub Pages workflow publishes both entry points from one Pages deployment:
+
+- User app: `https://codextech-lab.github.io/zerobyte-business/`
+- Admin console: `https://codextech-lab.github.io/zerobyte-business/admin.html`
+
+Configure the repository Actions secrets `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_ADMIN_EMAILS` before deploying.
+
 ## Architecture
 
 `src/lib/types.ts` is the shared domain contract, `src/lib/demoData.ts` contains intentionally local demo fixtures, and `src/lib/supabase.ts` is the single client/config boundary. Feature surfaces are rendered from `src/App.tsx` and are ready to split into route-level components as auth and persistence are connected. The deployed `create-sale` function is the persistence path for transactional sales once authenticated organization data is wired into the UI. Payments are intentionally not implemented.
