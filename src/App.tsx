@@ -3,7 +3,7 @@ import {
   ArrowRight, BarChart3, Bell, Check, ChevronRight, CircleHelp, FileText, LayoutDashboard,
   Menu, Package, PanelLeftClose, PanelLeftOpen, Plus, Receipt, Search, Settings, ShoppingCart, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react'
-import { isSupabaseConfigured, supabase } from './lib/supabase'
+import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase'
 import type { View } from './lib/types'
 
 const navGroups = [
@@ -227,16 +227,36 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
   }, [section])
   useEffect(() => {
     if (!supabase || section !== 'Users') return
+    const client = supabase
     setUserRowsLoading(true)
     setUserRowsError('')
-    supabase.functions.invoke('list-platform-users', { method: 'GET' }).then(({ data, error }) => {
-      setUserRowsLoading(false)
-      if (error) {
-        setUserRowsError(error.message)
+    let cancelled = false
+    const loadUsers = async () => {
+      const { data: sessionData, error: sessionError } = await client.auth.getSession()
+      if (sessionError || !sessionData.session || !supabaseUrl || !supabaseAnonKey) {
+        if (!cancelled) {
+          setUserRowsLoading(false)
+          setUserRowsError('Your admin session has expired. Sign out and sign in again.')
+        }
         return
       }
-      setUserRows((data?.users ?? []) as AdminRow[])
-    })
+      const response = await fetch(`${supabaseUrl}/functions/v1/list-platform-users?page=1&pageSize=100`, {
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+          apikey: supabaseAnonKey,
+        },
+      })
+      const payload = await response.json().catch(() => null)
+      if (cancelled) return
+      setUserRowsLoading(false)
+      if (!response.ok) {
+        setUserRowsError(response.status === 401 ? 'Your admin session was rejected by Supabase. Sign out and sign in again.' : payload?.message ?? payload ?? `User service returned ${response.status}.`)
+        return
+      }
+      setUserRows((payload?.users ?? []) as AdminRow[])
+    }
+    void loadUsers()
+    return () => { cancelled = true }
   }, [section])
   const adminSections: AdminSection[] = ['Overview', 'Users', 'Organizations', 'Branches', 'Inventory', 'Sales', 'Notifications', 'Audit log', 'Settings']
   const stats = [
