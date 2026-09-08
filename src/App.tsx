@@ -26,7 +26,8 @@ function isAdminEmail(email: string) {
 
 function App() {
   const [sessionReady, setSessionReady] = useState(false); const [signedIn, setSignedIn] = useState(false); const [email, setEmail] = useState(''); const [displayName, setDisplayName] = useState('')
-  const [path, setPath] = useState(window.location.pathname)
+  const adminEntry = window.location.pathname === '/admin' || window.location.pathname === '/admin.html'
+  const [path, setPath] = useState(adminEntry ? '/admin' : window.location.pathname)
 
   const navigate = (nextPath: string) => {
     window.history.pushState({}, '', nextPath)
@@ -34,7 +35,7 @@ function App() {
   }
 
   useEffect(() => {
-    const onPopState = () => setPath(window.location.pathname)
+    const onPopState = () => setPath(window.location.pathname === '/admin.html' ? '/admin' : window.location.pathname)
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])

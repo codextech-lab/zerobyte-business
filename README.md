@@ -33,7 +33,9 @@ The schema is organization-scoped, uses RLS policies for member access, records 
 
 ## Admin console
 
-The app includes a separated `/admin` route that requires an authenticated user whose email is listed in `VITE_ADMIN_EMAILS`. This is a platform-level control plane, not a normal user dashboard. Business ownership, workers, and organization memberships do not grant platform-admin access. Users who are not explicitly approved are denied access even if they can navigate to the admin URL directly.
+The repository includes a dedicated `admin.html` application entry plus the protected `/admin` route. Run the user app at `http://localhost:5173/` and the admin console at `http://localhost:5173/admin.html` (or `http://localhost:5173/admin`). The admin console requires an authenticated user whose email is listed in `VITE_ADMIN_EMAILS` and whose `platform_admin_access` row is active. This is a platform-level control plane, not a normal user dashboard. Business ownership, workers, and organization memberships do not grant platform-admin access. Users who are not explicitly approved are denied access even if they can navigate to the admin URL directly.
+
+For separate hosting, deploy the same production output to two sites: configure the user site to serve `index.html` and the admin site to serve `admin.html`. Both sites share the same Supabase project, while the admin site remains protected by the server-side platform-admin checks used by the Edge Functions and database RPCs.
 
 ## Architecture
 
