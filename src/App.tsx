@@ -3,7 +3,7 @@ import {
   ArrowRight, BarChart3, Bell, Check, ChevronRight, CircleHelp, ClipboardList, FileText, GitBranch, History, LayoutDashboard,
   Menu, Package, PanelLeftClose, PanelLeftOpen, Plus, Receipt, Search, Settings, ShoppingCart, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react'
-import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase'
+import { adminSupabase, isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase'
 import type { View } from './lib/types'
 
 const navGroups = [
@@ -50,8 +50,9 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!supabase) { setSessionReady(true); return }
-    supabase.auth.getSession().then(({ data }) => {
+    const authClient = adminEntry ? adminSupabase : supabase
+    if (!authClient) { setSessionReady(true); return }
+    authClient.auth.getSession().then(({ data }) => {
       const hasSession = Boolean(data.session)
       setSignedIn(hasSession); setEmail(data.session?.user.email ?? ''); setDisplayName(data.session?.user.user_metadata?.full_name ?? data.session?.user.user_metadata?.name ?? '')
       if (hasSession && window.location.pathname === '/auth') {
@@ -62,7 +63,7 @@ function App() {
       }
       setSessionReady(true)
     })
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data } = authClient.auth.onAuthStateChange((_event, session) => {
       const hasSession = Boolean(session)
       setSignedIn(hasSession); setEmail(session?.user.email ?? ''); setDisplayName(session?.user.user_metadata?.full_name ?? session?.user.user_metadata?.name ?? '')
       if (hasSession) {
@@ -75,7 +76,7 @@ function App() {
       }
     })
     return () => data.subscription.unsubscribe()
-  }, [])
+  }, [adminEntry])
 
   if (!sessionReady) return <WorkspaceSkeleton />
   if (path === '/terms' || path === '/privacy' || path === '/cookies') return <LegalPage type={path.slice(1) as 'terms' | 'privacy' | 'cookies'} />
@@ -84,7 +85,7 @@ function App() {
     if (!isSupabaseConfigured) return <AdminConsoleUnavailable />
     if (!signedIn) return <AdminLogin />
     if (!isAdminEmail(email)) return <AdminAccessDenied email={email} onBack={() => navigate('/')} />
-    return <AdminConsole email={email} onBack={() => navigate('/')} onLogout={() => { supabase?.auth.signOut(); window.localStorage.removeItem('zerobyte.admin-access'); navigate('/') }} />
+    return <AdminConsole email={email} onBack={() => navigate('/')} onLogout={() => { void adminSupabase?.auth.signOut(); window.localStorage.removeItem('zerobyte.admin-access'); navigate('/') }} />
   }
   if (!signedIn && path !== '/auth') return <Landing onStart={() => navigate('/auth')} />
   if (path === '/auth') return <AuthScreen />
@@ -131,12 +132,12 @@ function AdminLogin() {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!supabase) {
+    if (!adminSupabase) {
       setError('Supabase is not configured for the admin console.');
       return;
     }
     setLoading(true); setError('');
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error: authError } = await adminSupabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (authError) {
       setError(authError.message);
@@ -145,7 +146,7 @@ function AdminLogin() {
     const accountEmail = data.user?.email ?? email;
     if (!isAdminEmail(accountEmail)) {
       setError('This account does not have platform administrator access.');
-      void supabase.auth.signOut();
+      void adminSupabase.auth.signOut();
       return;
     }
     window.localStorage.setItem('zerobyte.admin-access', 'true');
@@ -181,8 +182,8 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('zerobyte.admin-sidebar-collapsed') === 'true')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   useEffect(() => {
-    if (!supabase) return
-    supabase.rpc('get_platform_overview').then(({ data, error }) => {
+    if (!adminSupabase) return
+    adminSupabase.rpc('get_platform_overview').then(({ data, error }) => {
       if (error) {
         setOverviewError(error.message.includes('does not exist') ? 'Apply the platform-admin migration in Supabase, then refresh.' : error.message)
         return
@@ -191,9 +192,9 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     })
   }, [])
   useEffect(() => {
-    if (!supabase) return
+    if (!adminSupabase) return
     setAnalyticsLoading(true)
-    supabase.rpc('get_platform_analytics', { period_key: analyticsPeriod }).then(({ data, error }) => {
+    adminSupabase.rpc('get_platform_analytics', { period_key: analyticsPeriod }).then(({ data, error }) => {
       setAnalyticsLoading(false)
       if (error) {
         setOverviewError(error.message.includes('does not exist') ? 'Apply the platform analytics migration in Supabase, then refresh.' : error.message)
@@ -203,7 +204,7 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     })
   }, [analyticsPeriod])
   useEffect(() => {
-    if (!supabase || section === 'Overview' || section === 'Settings' || section === 'Users') return
+    if (!adminSupabase || section === 'Overview' || section === 'Settings' || section === 'Users') return
     const tableBySection: Record<Exclude<AdminSection, 'Overview' | 'Settings' | 'Users'>, string> = {
       Organizations: 'organizations',
       Branches: 'branches',
@@ -215,7 +216,7 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     setRowsLoading(true)
     setRowsError('')
     const table = tableBySection[section]
-    supabase.from(table).select('*').order('created_at', { ascending: false }).limit(100).then(({ data, error }) => {
+    adminSupabase.from(table).select('*').order('created_at', { ascending: false }).limit(100).then(({ data, error }) => {
       setRowsLoading(false)
       if (error) {
         setRowsError(error.message)
@@ -226,8 +227,8 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     })
   }, [section])
   useEffect(() => {
-    if (!supabase || section !== 'Users') return
-    const client = supabase
+    if (!adminSupabase || section !== 'Users') return
+    const client = adminSupabase
     setUserRowsLoading(true)
     setUserRowsError('')
     let cancelled = false
@@ -291,10 +292,10 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
   }
   const sendNotification = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!supabase || !notificationTitle.trim() || !notificationMessage.trim()) return
+    if (!adminSupabase || !notificationTitle.trim() || !notificationMessage.trim()) return
     setNotificationStatus('Sending…')
-    const { error } = await supabase.from('admin_notifications').insert({
-      created_by: (await supabase.auth.getUser()).data.user?.id,
+    const { error } = await adminSupabase.from('admin_notifications').insert({
+      created_by: (await adminSupabase.auth.getUser()).data.user?.id,
       title: notificationTitle.trim(),
       message: notificationMessage.trim(),
       status: 'sent',
