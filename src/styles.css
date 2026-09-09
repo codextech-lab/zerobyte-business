@@ -233,7 +233,11 @@ td:last-child, th:last-child { padding-right: 0; }
 .admin-role span { color: #7f91a2; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .admin-role strong { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .admin-nav { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; overflow-x: hidden; padding-right: 4px; scrollbar-width: thin; scrollbar-color: #2a4052 transparent; }
-.admin-nav-item { background: transparent; border: 1px solid transparent; color: #9aa9b7; border-radius: 8px; padding: 10px 12px; text-align: left; font-size: 12px; }
+.admin-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: 1px solid transparent; color: #9aa9b7; border-radius: 8px; padding: 10px 12px; text-align: left; font-size: 12px; }
+.admin-nav-item svg { flex: 0 0 auto; color: #72879a; }
+.admin-nav-item.active svg, .admin-nav-item:hover svg { color: #60a5fa; }
+.admin-nav-item:hover { background: rgba(59, 130, 246, .07); color: #dfeeff; }
+.admin-sidebar-collapsed .admin-nav-item { justify-content: center; padding-inline: 9px; }
 .admin-nav-item.active { background: rgba(59, 130, 246, .12); border-color: rgba(59, 130, 246, .32); color: #dfeeff; }
 .admin-sidebar-footer { margin-top: auto; flex-shrink: 0; display: grid; gap: 7px; }
 .admin-footer-button { width: 100%; justify-content: center; }

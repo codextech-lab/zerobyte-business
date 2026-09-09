@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ArrowRight, BarChart3, Bell, Check, ChevronRight, CircleHelp, FileText, LayoutDashboard,
+  ArrowRight, BarChart3, Bell, Check, ChevronRight, CircleHelp, ClipboardList, FileText, GitBranch, History, LayoutDashboard,
   Menu, Package, PanelLeftClose, PanelLeftOpen, Plus, Receipt, Search, Settings, ShoppingCart, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react'
 import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase'
@@ -259,6 +259,17 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     return () => { cancelled = true }
   }, [section])
   const adminSections: AdminSection[] = ['Overview', 'Users', 'Organizations', 'Branches', 'Inventory', 'Sales', 'Notifications', 'Audit log', 'Settings']
+  const adminSectionIcons: Record<AdminSection, typeof LayoutDashboard> = {
+    Overview: LayoutDashboard,
+    Users,
+    Organizations: ClipboardList,
+    Branches: GitBranch,
+    Inventory: Package,
+    Sales: ShoppingCart,
+    Notifications: Bell,
+    'Audit log': History,
+    Settings,
+  }
   const stats = [
     { label: 'Registered users', key: 'users', detail: 'Accounts registered in Supabase Auth.' },
     { label: 'Organizations', key: 'organizations', detail: 'Businesses created in the shared backend.' },
@@ -320,7 +331,7 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     setSection(nextSection)
     setMobileNavOpen(false)
   }
-  return <div className={`admin-shell${sidebarCollapsed ? ' admin-sidebar-collapsed' : ''}${mobileNavOpen ? ' admin-mobile-nav-open' : ''}`}><aside className="admin-sidebar"><div className="admin-brand-row"><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>Admin</small></div><button className="admin-collapse-button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Expand admin sidebar' : 'Collapse admin sidebar'}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div><div className="admin-role"><span>Signed in as</span><strong>{email}</strong></div><nav className="admin-nav">{adminSections.map((name) => <button key={name} className={`admin-nav-item${section === name ? ' active' : ''}`} onClick={() => selectSection(name)}>{name}</button>)}</nav><div className="admin-sidebar-footer"><button className="secondary admin-footer-button" onClick={onBack}>Return to app</button><button className="text-btn admin-footer-button" onClick={onLogout}>Log out</button></div></aside><main className="admin-main"><header className="admin-header"><div className="admin-title-row"><button className="admin-mobile-menu" onClick={() => setMobileNavOpen(!mobileNavOpen)} aria-label="Open admin navigation"><Menu size={20} /></button><div><span className="section-label">Platform operations</span><h1>{section}</h1></div></div><div className="admin-actions"><button className="secondary" onClick={() => selectSection('Audit log')}>View audit log</button><button className="primary" onClick={() => selectSection('Notifications')}>Send broadcast</button></div></header>{overviewError && <div className="form-error" role="alert">{overviewError}</div>}{renderSection()}</main></div>
+  return <div className={`admin-shell${sidebarCollapsed ? ' admin-sidebar-collapsed' : ''}${mobileNavOpen ? ' admin-mobile-nav-open' : ''}`}><aside className="admin-sidebar"><div className="admin-brand-row"><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>Admin</small></div><button className="admin-collapse-button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Expand admin sidebar' : 'Collapse admin sidebar'}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div><div className="admin-role"><span>Signed in as</span><strong>{email}</strong></div><nav className="admin-nav">{adminSections.map((name) => { const Icon = adminSectionIcons[name]; return <button key={name} className={`admin-nav-item${section === name ? ' active' : ''}`} onClick={() => selectSection(name)} title={sidebarCollapsed ? name : undefined} aria-label={name}><Icon size={16} aria-hidden="true" /><span>{name}</span></button> })}</nav><div className="admin-sidebar-footer"><button className="secondary admin-footer-button" onClick={onBack}>Return to app</button><button className="text-btn admin-footer-button" onClick={onLogout}>Log out</button></div></aside><main className="admin-main"><header className="admin-header"><div className="admin-title-row"><button className="admin-mobile-menu" onClick={() => setMobileNavOpen(!mobileNavOpen)} aria-label="Open admin navigation"><Menu size={20} /></button><div><span className="section-label">Platform operations</span><h1>{section}</h1></div></div><div className="admin-actions"><button className="secondary" onClick={() => selectSection('Audit log')}>View audit log</button><button className="primary" onClick={() => selectSection('Notifications')}>Send broadcast</button></div></header>{overviewError && <div className="form-error" role="alert">{overviewError}</div>}{renderSection()}</main></div>
 }
 
 function AuthScreen() {
