@@ -9,7 +9,7 @@ export type View =
   | 'Reports'
   | 'Branches'
   | 'Workforce'
-  | 'Attendance'
+  | 'User Accounts'
   | 'Settings'
 
 export type Product = {
