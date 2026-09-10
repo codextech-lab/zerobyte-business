@@ -473,8 +473,8 @@ begin
   end if;
 
   if resolved_branch is null and not public.is_org_manager(target_org) then
-    select count(*), min(bm.branch_id)
-      into assigned_branch_count, assigned_branch
+    select count(*)
+      into assigned_branch_count
     from public.branch_members bm
     join public.branches b on b.id = bm.branch_id
     where bm.user_id = auth.uid()
@@ -483,6 +483,14 @@ begin
     if assigned_branch_count <> 1 then
       raise exception 'Select one of your assigned branches';
     end if;
+    select bm.branch_id
+      into assigned_branch
+    from public.branch_members bm
+    join public.branches b on b.id = bm.branch_id
+    where bm.user_id = auth.uid()
+      and b.organization_id = target_org
+      and b.status = 'active'
+    limit 1;
     resolved_branch := assigned_branch;
   elsif resolved_branch is not null then
     if not public.valid_org_branch(target_org, resolved_branch) then

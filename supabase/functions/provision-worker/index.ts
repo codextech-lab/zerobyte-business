@@ -54,19 +54,29 @@ serve(async (request) => {
     return json({ error: 'Request body must be valid JSON' }, 400)
   }
 
-  const organizationId = String(body.organizationId ?? '')
-  const branchId = body.branchId ? String(body.branchId) : null
-  const employeeId = String(body.employeeId ?? '').trim()
-  const fullName = String(body.fullName ?? '').trim()
+  // Accept the canonical camelCase contract and the legacy form field names
+  // so an older browser bundle cannot silently turn a complete form into an
+  // apparently empty request during a rolling deploy.
+  const organizationId = String(body.organizationId ?? body.organization_id ?? '').trim()
+  const branchId = body.branchId || body.branch_id ? String(body.branchId ?? body.branch_id) : null
+  const employeeId = String(body.employeeId ?? body.employee_id ?? '').trim()
+  const fullName = String(body.fullName ?? body.full_name ?? '').trim()
   const email = String(body.email ?? '').trim().toLowerCase()
   const phone = body.phone ? String(body.phone).trim() : null
-  const jobTitle = body.jobTitle ? String(body.jobTitle).trim() : null
+  const jobTitle = body.jobTitle || body.job_title ? String(body.jobTitle ?? body.job_title).trim() : null
   const department = body.department ? String(body.department).trim() : null
-  const hiredOn = body.hiredOn ? String(body.hiredOn) : null
-  const monthlySalary = body.monthlySalary === '' || body.monthlySalary == null ? null : Number(body.monthlySalary)
+  const hiredOn = body.hiredOn || body.hired_on ? String(body.hiredOn ?? body.hired_on) : null
+  const monthlySalaryValue = body.monthlySalary ?? body.monthly_salary
+  const monthlySalary = monthlySalaryValue === '' || monthlySalaryValue == null ? null : Number(monthlySalaryValue)
 
   if (!organizationId || !employeeId || !fullName || !email) {
-    return json({ error: 'organizationId, employeeId, fullName, and email are required' }, 400)
+    const missing = [
+      !organizationId && 'organizationId',
+      !employeeId && 'employeeId',
+      !fullName && 'fullName',
+      !email && 'email',
+    ].filter(Boolean)
+    return json({ error: `Missing required worker fields: ${missing.join(', ')}` }, 400)
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return json({ error: 'A valid worker email is required' }, 400)
@@ -170,6 +180,12 @@ serve(async (request) => {
       target_user: userId,
     })
     if (linkError) throw new Error(linkError.message)
+    if (branchId) {
+      const { error: branchMemberError } = await adminClient
+        .from('branch_members')
+        .insert({ branch_id: branchId, user_id: userId })
+      if (branchMemberError) throw new Error(branchMemberError.message)
+    }
   } catch (error) {
     if (employeeProfileId) {
       await adminClient.from('employee_profiles').delete().eq('id', employeeProfileId)

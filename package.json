@@ -15,7 +15,8 @@
     "supabase:functions:deploy": "supabase functions deploy create-sale --no-verify-jwt",
     "supabase:functions:deploy:admin": "supabase functions deploy list-platform-users --no-verify-jwt",
     "supabase:functions:deploy:worker": "supabase functions deploy provision-worker --no-verify-jwt",
-    "supabase:functions:deploy:worker-login": "supabase functions deploy resolve-worker-login --no-verify-jwt"
+    "supabase:functions:deploy:worker-login": "supabase functions deploy resolve-worker-login --no-verify-jwt",
+    "supabase:functions:deploy:audit": "supabase functions deploy list-platform-audit --no-verify-jwt"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
