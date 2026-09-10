@@ -41,6 +41,12 @@ npm run supabase:functions:deploy
 
 The schema is organization-scoped, uses RLS policies for member access, records sale mutations in `audit_logs`, provides notifications and entitlements tables, and performs inventory-safe sale creation through a transactional Postgres function. The repo also includes a platform-admin console schema (`platform_admin_access`, `admin_audit_logs`, `admin_notifications`) with clear separation from business roles. Keep service-role credentials server-side; this client only uses the publishable anon key.
 
+### Offline-first behavior
+
+The signed-in business app keeps an organization- and user-scoped IndexedDB cache of authorized products, customers, and recent sale data. Sale carts are persistent drafts, and eligible offline sales plus safe customer captures are stored in a durable sync queue with operation IDs, retry counts, and conflict states. When connectivity returns, the queue calls the idempotent `create_sale_with_operation` / `create_customer_with_operation` RPCs; the server recalculates totals, enforces stock and membership checks, and RLS remains enabled. Apply `20260910110000_offline_idempotency.sql` before deploying offline sync.
+
+Only the app shell is cached by `public/sw.js`. Supabase responses and other private API requests are never written to the service-worker cache. Inventory receiving remains online-only because it changes shared stock and requires a live server transaction. IndexedDB data is cleared for the signed-out account and is never shared between organization or account scopes. Offline data is device-local and should be synced before clearing browser storage or uninstalling the PWA; conflict items require an online retry or manual review.
+
 ### Worker accounts
 
 Owners provision workers from **Workforce**. The `provision-worker` Edge Function validates the owner membership, creates the Auth account with a random temporary password, links the employee and organization membership, and returns that password once. Plaintext passwords are never stored. A worker is routed to a mandatory password-change screen on first login, including when the browser is refreshed or a protected route is entered directly. Employee-ID login is resolved server-side by `resolve-worker-login`; the browser never enumerates employee email addresses.

@@ -10,14 +10,24 @@ serve(async (request) => {
   })
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return new Response('Unauthorized', { status: 401 })
-  const { organizationId, customerId, items } = await request.json()
+  const { organizationId, customerId, items, operationId, branchId, paymentMethod } = await request.json()
   if (!organizationId || !Array.isArray(items) || items.length === 0) {
     return new Response('organizationId and items are required', { status: 400 })
   }
-  const { data, error } = await supabase.rpc('create_sale', {
+  const rpcName = operationId ? 'create_sale_with_operation' : 'create_sale'
+  const { data, error } = await supabase.rpc(rpcName, operationId ? {
     target_org: organizationId,
     target_customer: customerId ?? null,
     items,
+    target_branch: branchId ?? null,
+    target_payment_method: paymentMethod ?? 'cash',
+    operation_id: operationId,
+  } : {
+    target_org: organizationId,
+    target_customer: customerId ?? null,
+    items,
+    target_branch: branchId ?? null,
+    target_payment_method: paymentMethod ?? 'cash',
   })
   if (error) return new Response(error.message, { status: 400 })
   return Response.json({ saleId: data })
