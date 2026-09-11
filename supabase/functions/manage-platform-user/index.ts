@@ -35,6 +35,25 @@ serve(async (request) => {
   if (!userId) return json({ error: 'User is required' }, 400)
   if (userId === caller.id) return json({ error: 'You cannot ban your own administrator account' }, 400)
 
+  if (action === 'ban') {
+    const { data: memberships, error: membershipError } = await admin
+      .from('organization_members')
+      .select('organization_id')
+      .eq('user_id', userId)
+    if (membershipError) return json({ error: 'Could not load the user organizations' }, 500)
+    if (memberships?.length) {
+      const { error: notificationError } = await admin.from('notifications').insert(
+        memberships.map((membership) => ({
+          organization_id: membership.organization_id,
+          user_id: userId,
+          title: 'Account access suspended',
+          body: 'A platform administrator suspended your account. You can no longer sign in until an administrator restores access.',
+        })),
+      )
+      if (notificationError) return json({ error: 'Could not deliver the account status notification' }, 500)
+    }
+  }
+
   const { error: updateError } = await admin.auth.admin.updateUserById(userId, { ban_duration: action === 'ban' ? '876000h' : 'none' })
   if (updateError) return json({ error: updateError.message }, 502)
   await admin.from('admin_audit_logs').insert({

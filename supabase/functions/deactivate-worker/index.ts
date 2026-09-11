@@ -67,6 +67,20 @@ serve(async (request) => {
   if (action === 'unban' && employee.employment_status === 'active') return json({ ok: true })
 
   if (employee.user_id) {
+    const notificationTitle = action === 'ban' ? 'Account access suspended' : 'Account access restored'
+    const notificationBody = action === 'ban'
+      ? 'An organization owner suspended your staff account. You can no longer sign in until an owner restores access.'
+      : 'An organization owner restored your staff account. You can sign in again.'
+    const { error: notificationError } = await admin.from('notifications').insert({
+      organization_id: organizationId,
+      user_id: employee.user_id,
+      title: notificationTitle,
+      body: notificationBody,
+    })
+    if (notificationError) return json({ error: 'Could not deliver the account status notification' }, 500)
+  }
+
+  if (employee.user_id) {
     const { error: banError } = await admin.auth.admin.updateUserById(employee.user_id, { ban_duration: action === 'ban' ? '876000h' : 'none' })
     if (banError) return json({ error: 'Could not revoke the worker sign-in' }, 502)
     if (action === 'ban') await admin.from('branch_members').delete().eq('user_id', employee.user_id)
