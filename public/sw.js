@@ -1,4 +1,4 @@
-const CACHE_NAME = 'zerobyte-shell-v4'
+const CACHE_NAME = 'zerobyte-shell-v5'
 const scopeUrl = new URL(self.registration.scope)
 const BASE_PATH = scopeUrl.pathname.endsWith('/') ? scopeUrl.pathname : `${scopeUrl.pathname}/`
 const appUrl = (path) => new URL(path.replace(/^\//, ''), scopeUrl).pathname

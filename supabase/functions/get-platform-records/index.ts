@@ -39,6 +39,11 @@ serve(async (request) => {
   if (accessError || !allowed) return json({ error: 'Platform administrator access required' }, 403)
 
   const resource = resources[new URL(request.url).searchParams.get('resource') as keyof typeof resources]
+  // Older admin bundles may ask this records endpoint for Monitoring. Keep that
+  // request harmless while the dedicated monitoring checks provide the metrics.
+  if (new URL(request.url).searchParams.get('resource') === 'Monitoring') {
+    return json({ rows: [], resource: 'Monitoring', message: 'Use the monitoring checks for browser-observed diagnostics.' })
+  }
   if (!resource) return json({ error: 'Unknown platform resource' }, 400)
   const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
   const { data, error } = await admin.from(resource.table).select(resource.columns).order('created_at', { ascending: false }).limit(100)
