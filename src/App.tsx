@@ -940,12 +940,12 @@ function Records({ orgId, search }: { orgId: string; search: string }) {
 }
 
 function SalesRecords({ orgId, search }: { orgId: string; search: string }) {
-  const [rows, setRows] = useState<{ id: string; customer_id: string | null; total: number; status: string; created_at: string; customer?: { name: string }[] | null }[]>([])
+  const [rows, setRows] = useState<{ id: string; customer_id: string | null; total: number; status: string; created_at: string; customer?: { name: string }[] | null; items?: { quantity: number; unit_price: number; products?: { name: string; sku: string } | { name: string; sku: string }[] | null }[] }[]>([])
   const [error, setError] = useState(''); const [dates, setDates] = useState({ from: '', to: '' })
   const applyDates = useCallback((next: { from: string; to: string }) => setDates(next), [])
   const load = useCallback(async () => {
     if (!supabase) return
-    let query = supabase.from('sales').select('id,customer_id,total,status,created_at,customer:customers(name)').eq('organization_id', orgId).order('created_at', { ascending: false })
+    let query = supabase.from('sales').select('id,customer_id,total,status,created_at,customer:customers(name),items:sale_items(quantity,unit_price,products(name,sku))').eq('organization_id', orgId).order('created_at', { ascending: false })
     if (dates.from) query = query.gte('created_at', `${dates.from}T00:00:00.000Z`)
     if (dates.to) query = query.lte('created_at', `${dates.to}T23:59:59.999Z`)
     const { data, error: result } = await query
@@ -954,9 +954,11 @@ function SalesRecords({ orgId, search }: { orgId: string; search: string }) {
   }, [dates, orgId])
   useEffect(() => { void load() }, [load])
   const customerName = (row: typeof rows[number]) => row.customer?.[0]?.name ?? 'Walk-in customer'
-  const filtered = rows.filter((row) => `${customerName(row)} ${row.status} ${row.id}`.toLowerCase().includes(search.toLowerCase()))
+  const productName = (item: NonNullable<typeof rows[number]['items']>[number]) => Array.isArray(item.products) ? item.products[0]?.name ?? 'Product' : item.products?.name ?? 'Product'
+  const itemSummary = (row: typeof rows[number]) => row.items?.length ? row.items.map((item) => `${productName(item)} × ${item.quantity}`).join(', ') : 'Item details unavailable'
+  const filtered = rows.filter((row) => `${customerName(row)} ${itemSummary(row)} ${row.status} ${row.id}`.toLowerCase().includes(search.toLowerCase()))
   const total = filtered.reduce((sum, row) => sum + Number(row.total), 0)
-  return <section className="panel table-panel records-panel"><RecordFilters storageKey="zerobyte.records.sales" onChange={applyDates} /><div className="panel-heading"><div><span className="section-label">Completed activity</span><h2>{filtered.length} sale{filtered.length === 1 ? '' : 's'}</h2></div><div className="record-actions"><span className="record-count">Total ₦{total.toLocaleString('en-NG')}</span><button className="secondary" onClick={() => downloadCsv('zerobyte-sales.csv', ['Sale', 'Customer', 'Status', 'Date', 'Total'], filtered.map((row) => [row.id, customerName(row), row.status, row.created_at, row.total]))} disabled={!filtered.length}>Export CSV</button></div></div>{error && <div className="form-error">{error}</div>}{filtered.length ? <div className="table-wrap"><table><thead><tr><th>Sale</th><th>Customer</th><th>Status</th><th>Date</th><th>Total</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td className="mono">#{row.id.slice(0, 8)}</td><td>{customerName(row)}</td><td><span className="status completed">{row.status}</span></td><td>{new Date(row.created_at).toLocaleString('en-NG')}</td><td className="amount">₦{Number(row.total).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No sales records yet" text="Completed sales will appear here after you record them." />}</section>
+  return <section className="panel table-panel records-panel"><RecordFilters storageKey="zerobyte.records.sales" onChange={applyDates} /><div className="panel-heading"><div><span className="section-label">Completed activity</span><h2>{filtered.length} sale{filtered.length === 1 ? '' : 's'}</h2></div><div className="record-actions"><span className="record-count">Total ₦{total.toLocaleString('en-NG')}</span><button className="secondary" onClick={() => downloadCsv('zerobyte-sales.csv', ['Sale', 'Customer', 'Items sold', 'Status', 'Date', 'Total'], filtered.map((row) => [row.id, customerName(row), itemSummary(row), row.status, row.created_at, row.total]))} disabled={!filtered.length}>Export CSV</button></div></div>{error && <div className="form-error">{error}</div>}{filtered.length ? <div className="table-wrap"><table><thead><tr><th>What was sold</th><th>Customer</th><th>Status</th><th>Date</th><th>Total</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td><strong className="sale-record-items">{itemSummary(row)}</strong><small className="table-sub mono">Sale #{row.id.slice(0, 8)}</small></td><td>{customerName(row)}</td><td><span className="status completed">{row.status}</span></td><td>{new Date(row.created_at).toLocaleString('en-NG')}</td><td className="amount">₦{Number(row.total).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No sales records yet" text="Completed sales will appear here after you record them." />}</section>
 }
 
 function ExpenseRecords({ orgId }: { orgId: string }) {

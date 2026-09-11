@@ -595,6 +595,7 @@ td:last-child, th:last-child { padding-right: 0; }
 .record-tab:hover { color: var(--text); transform: translateY(-1px); }
 .record-tab.active { color: #e9fbff; background: linear-gradient(135deg, #12394a, #102631); box-shadow: inset 0 0 0 1px #1d6070; }
 .records-panel { margin-top: 0; }
+.sale-record-items { display: block; max-width: 360px; white-space: normal; line-height: 1.45; }
 .record-count { padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; white-space: nowrap; }
 .stock-intake-form { grid-template-columns: 1.25fr repeat(4, minmax(0, 1fr)); }
 .stock-intake-form .receive-heading { grid-column: 1 / -1; }
