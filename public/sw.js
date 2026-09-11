@@ -2,7 +2,7 @@ const CACHE_NAME = 'zerobyte-shell-v4'
 const scopeUrl = new URL(self.registration.scope)
 const BASE_PATH = scopeUrl.pathname.endsWith('/') ? scopeUrl.pathname : `${scopeUrl.pathname}/`
 const appUrl = (path) => new URL(path.replace(/^\//, ''), scopeUrl).pathname
-const APP_SHELL = ['', 'index.html', 'admin.html', '404.html', 'manifest.webmanifest', 'site.webmanifest', 'favicon.svg', 'icon-192.png', 'icon-512.png'].map(appUrl)
+const APP_SHELL = ['', 'index.html', 'admin.html', '404.html', 'manifest.webmanifest', 'admin-manifest.webmanifest', 'site.webmanifest', 'favicon.svg', 'icon-192.png', 'icon-512.png'].map(appUrl)
 
 function isPrivateApi(url) {
   const relativePath = url.pathname.slice(BASE_PATH.length)
