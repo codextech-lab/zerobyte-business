@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ArrowRight, BarChart3, Bell, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, FileText, GitBranch, History, LayoutDashboard,
-  LogOut, Menu, Package, PanelLeftClose, PanelLeftOpen, Palette, Plus, Receipt, Search, Settings, ShoppingCart, ShieldCheck, UserRound, Users, Wallet, X,
+  ArrowRight, BarChart3, Bell, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, FileText, Gauge, GitBranch, History, LayoutDashboard,
+  LogOut, Menu, Package, PanelLeftClose, PanelLeftOpen, Palette, Plus, Receipt, RefreshCw, Search, Settings, ShoppingCart, ShieldCheck, UserRound, Users, Wallet, Wifi, X,
 } from 'lucide-react'
 import { adminSupabase, isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase'
 import { getCurrentUserContext } from './lib/identity'
@@ -245,9 +245,10 @@ function AdminAccessDenied({ email, onBack }: { email: string; onBack: () => voi
 }
 
 function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () => void; onLogout: () => void }) {
-  type AdminSection = 'Overview' | 'Users' | 'Organizations' | 'Branches' | 'Inventory' | 'Sales' | 'Notifications' | 'Audit log' | 'Settings'
+  type AdminSection = 'Overview' | 'Users' | 'Organizations' | 'Branches' | 'Inventory' | 'Sales' | 'Notifications' | 'Audit log' | 'Monitoring' | 'Settings'
   type AdminRow = Record<string, string | number | null>
   type AuditEntry = { source: string; id: string; action: string; actor: string | null; target: string; organizationId: string | null; metadata: Record<string, unknown>; createdAt: string }
+  type MonitorMetric = { name: string; latency: number | null; status: 'ok' | 'error'; detail: string; checkedAt: string }
   const formatAdminValue = (column: string, value: string | number | null) => {
     if (value == null || value === '') return '—'
     if (['created_at', 'updated_at', 'last_sign_in_at', 'sent_at'].includes(column)) {
@@ -277,8 +278,13 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
   const [versionMessage, setVersionMessage] = useState('')
   const [versionHistory, setVersionHistory] = useState<{ id: string; version: string; message: string; created_at: string }[]>([])
   const [notificationStatus, setNotificationStatus] = useState('')
+  const [notificationBusy, setNotificationBusy] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('zerobyte.admin-sidebar-collapsed') === 'true')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [monitorMetrics, setMonitorMetrics] = useState<MonitorMetric[]>([])
+  const [monitorLoading, setMonitorLoading] = useState(false)
+  const [monitorError, setMonitorError] = useState('')
+  const [monitorUpdatedAt, setMonitorUpdatedAt] = useState<string | null>(null)
   useEffect(() => {
     if (!adminSupabase) return
     adminSupabase.rpc('get_platform_overview').then(({ data, error }) => {
@@ -390,6 +396,38 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     void loadUsers()
     return () => { cancelled = true }
   }, [section])
+  const runMonitoringChecks = useCallback(async () => {
+    if (!adminSupabase || !supabaseUrl || !supabaseAnonKey) return
+    const client = adminSupabase
+    const anonKey = supabaseAnonKey
+    setMonitorLoading(true); setMonitorError('')
+    const measure = async (name: string, operation: () => PromiseLike<{ error?: { message: string } | null }>): Promise<MonitorMetric> => {
+      const started = performance.now()
+      try {
+        const result = await operation()
+        const latency = Math.round(performance.now() - started)
+        return { name, latency, status: result.error ? 'error' : 'ok', detail: result.error?.message ?? 'Request completed', checkedAt: new Date().toISOString() }
+      } catch (reason) {
+        return { name, latency: Math.round(performance.now() - started), status: 'error', detail: reason instanceof Error ? reason.message : 'Request failed', checkedAt: new Date().toISOString() }
+      }
+    }
+    const metrics = await Promise.all([
+      measure('Platform overview RPC', () => client.rpc('get_platform_overview')),
+      measure('Platform analytics RPC', () => client.rpc('get_platform_analytics', { period_key: '7d' })),
+      measure('Admin records API', async () => {
+        const { data } = await client.auth.getSession()
+        const response = await fetch(`${supabaseUrl}/functions/v1/get-platform-records?resource=Notifications`, { headers: { Authorization: `Bearer ${data.session?.access_token ?? ''}`, apikey: anonKey } })
+        return { error: response.ok ? null : { message: `HTTP ${response.status}` } }
+      }),
+    ])
+    setMonitorMetrics(metrics); setMonitorUpdatedAt(new Date().toISOString()); setMonitorLoading(false)
+  }, [])
+  useEffect(() => {
+    if (section !== 'Monitoring') return
+    void runMonitoringChecks()
+    const interval = window.setInterval(() => { if (document.visibilityState === 'visible') void runMonitoringChecks() }, 30000)
+    return () => window.clearInterval(interval)
+  }, [runMonitoringChecks, section])
   const adminSectionIcons: Record<AdminSection, typeof LayoutDashboard> = {
     Overview: LayoutDashboard,
     Users,
@@ -399,12 +437,13 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     Sales: ShoppingCart,
     Notifications: Bell,
     'Audit log': History,
+    Monitoring: Gauge,
     Settings,
   }
   const adminSectionGroups: { label: string; items: AdminSection[] }[] = [
     { label: 'Control room', items: ['Overview', 'Users', 'Organizations'] },
     { label: 'Operations', items: ['Branches', 'Inventory', 'Sales'] },
-    { label: 'Governance', items: ['Notifications', 'Audit log', 'Settings'] },
+    { label: 'Governance', items: ['Notifications', 'Audit log', 'Monitoring', 'Settings'] },
   ]
   const stats = [
     { label: 'Registered users', key: 'users', detail: 'Accounts registered in Supabase Auth.' },
@@ -428,28 +467,31 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
   const sendNotification = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!adminSupabase || !notificationTitle.trim() || !notificationMessage.trim()) return
-    setNotificationStatus('Sending…')
+    setNotificationBusy(true); setNotificationStatus('Sending…')
     const { error } = await adminSupabase.rpc('send_platform_broadcast', {
       notification_title: notificationTitle.trim(),
       notification_message: notificationMessage.trim(),
       target_audience: 'all_users',
     })
     if (error) {
+      setNotificationBusy(false)
       setNotificationStatus(error.message)
       return
     }
     setNotificationTitle('')
     setNotificationMessage('')
     setNotificationStatus('Broadcast delivered to recipient notification centers and recorded in the audit log.')
+    setNotificationBusy(false)
     setRows((current) => [{ title: notificationTitle, message: notificationMessage, status: 'sent', created_at: new Date().toISOString() }, ...current])
   }
   const publishVersion = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!adminSupabase || !version.trim() || !versionMessage.trim()) return
-    setNotificationStatus('Publishing version announcement…')
+    setNotificationBusy(true); setNotificationStatus('Publishing version announcement…')
     const { error } = await adminSupabase.rpc('publish_version_announcement', { announcement_version: version.trim(), announcement_message: versionMessage.trim() })
-    if (error) { setNotificationStatus(error.message); return }
+    if (error) { setNotificationBusy(false); setNotificationStatus(error.message); return }
     setVersion(''); setVersionMessage(''); setNotificationStatus('Version announcement delivered to user notification centers and recorded in the audit log.')
+    setNotificationBusy(false)
   }
   const setPlatformUserStatus = async (userId: string, action: 'ban' | 'unban') => {
     if (!adminSupabase || !window.confirm(`${action === 'ban' ? 'Ban' : 'Unban'} this user account?`)) return
@@ -466,9 +508,10 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
       return <>{overview ? <div className="admin-grid admin-summary-grid">{['users', 'organizations', 'sales', 'products'].map((key) => <article key={key} className="admin-card"><div className="admin-card-label">{key}</div><div className="admin-card-value">{(overview[key] ?? 0).toLocaleString()}</div><p>Current platform total</p></article>)}</div> : <div className="admin-grid admin-summary-grid">{[1, 2, 3, 4].map((item) => <article key={item} className="admin-card admin-card-skeleton"><Skeleton className="skeleton-line short" /><Skeleton className="skeleton-line value" /><Skeleton className="skeleton-line" /></article>)}</div>}<section className="admin-card admin-trend-card"><div className="admin-card-header"><div><h2>Platform growth</h2><p>New users, organizations, and sales recorded over time.</p></div><div className="admin-chart-controls"><select value={analyticsPeriod} onChange={(event) => setAnalyticsPeriod(event.target.value)} aria-label="Analytics period"><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="12m">Last 12 months</option><option value="5y">Last 5 years</option></select><span className="admin-pill success">{analyticsLoading ? 'Updating' : 'Live data'}</span></div></div>{analyticsLoading ? <div className="admin-line-skeleton"><Skeleton /><Skeleton /><Skeleton /></div> : <div className="admin-trend-chart"><div className="admin-trend-grid"><i /><i /><i /><i /></div><svg viewBox="0 0 1000 280" preserveAspectRatio="none" aria-label="Platform growth chart"><polyline points={analytics.map((point, index) => `${analytics.length === 1 ? 500 : index / (analytics.length - 1) * 1000},${270 - point.users / maxTrend * 220}`).join(' ')} /><polyline className="org-line" points={analytics.map((point, index) => `${analytics.length === 1 ? 500 : index / (analytics.length - 1) * 1000},${270 - point.organizations / maxTrend * 220}`).join(' ')} /><polyline className="sales-line" points={analytics.map((point, index) => `${analytics.length === 1 ? 500 : index / (analytics.length - 1) * 1000},${270 - point.sales / maxTrend * 220}`).join(' ')} /></svg><div className="admin-trend-labels">{analytics.filter((_, index) => index === 0 || index === analytics.length - 1 || index % Math.max(1, Math.floor(analytics.length / 5)) === 0).map((point) => <span key={point.label}>{point.label}</span>)}</div></div>}<div className="admin-chart-legend"><span><i className="users-dot" /> Users</span><span><i className="org-dot" /> Organizations</span><span><i className="sales-dot" /> Sales</span></div></section><div className="admin-overview-columns"><section className="admin-card admin-chart-card"><div className="admin-card-header"><div><h2>Platform footprint</h2><p>Current records by operational area.</p></div><span className="admin-pill success">{overview ? 'Live data' : 'Connecting'}</span></div>{overview ? <div className="admin-bar-chart">{chartItems.map((stat) => <div className="admin-bar-item" key={stat.label}><div className="admin-bar-track"><i style={{ height: `${Math.max(6, ((overview[stat.key ?? ''] ?? 0) / maxValue) * 100)}%` }} /></div><strong>{(overview[stat.key ?? ''] ?? 0).toLocaleString()}</strong><small>{stat.label}</small></div>)}</div> : <div className="admin-chart-skeleton"><Skeleton /><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>}</section><section className="admin-card admin-brief-card"><div className="admin-card-header"><div><h2>Platform monitoring</h2><p>{overview ? 'Live counts from the shared Supabase backend.' : 'Preparing the platform overview.'}</p></div></div><div className="admin-list">{['Users', 'Organizations', 'Branches', 'Inventory', 'Sales', 'Notifications'].map((name) => <div key={name} className="admin-list-item"><div><strong>{name}</strong><p>Open the live administrative view.</p></div><button className="text-btn" onClick={() => setSection(name as AdminSection)}>Open</button></div>)}</div></section></div></>
     }
     if (section === 'Users') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Users</h2><p>Platform accounts loaded through the protected Auth listing Edge Function.</p></div><span className="admin-pill success">Secure live view</span></div>{userRowsLoading ? <div className="admin-table-skeleton">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="admin-skeleton-row"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>)}</div> : userRowsError ? <div className="form-error" role="alert">{userRowsError}. Deploy list-platform-users and manage-platform-user, then refresh.</div> : !userRows.length ? <div className="admin-empty">No users found.</div> : <div className="table-wrap"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Created</th><th>Last sign in</th><th>Access</th></tr></thead><tbody>{userRows.map((row) => <tr key={String(row.id)}><td>{String(row.name ?? '—')}</td><td>{String(row.email ?? '—')}</td><td>{String(row.phone ?? '—')}</td><td><span className={`admin-status ${row.status === 'active' ? 'active' : ''}`}>{String(row.status ?? '—')}</span></td><td>{formatAdminValue('created_at', row.created_at)}</td><td>{row.last_sign_in_at ? formatAdminValue('last_sign_in_at', row.last_sign_in_at) : 'Never'}</td><td>{row.status === 'banned' ? <button className="text-btn" onClick={() => void setPlatformUserStatus(String(row.id), 'unban')}>Unban</button> : <button className="text-btn danger-text" onClick={() => void setPlatformUserStatus(String(row.id), 'ban')}>Ban</button>}</td></tr>)}</tbody></table></div>}</section>
+    if (section === 'Monitoring') return <section className="admin-card wide monitoring-page"><div className="admin-card-header"><div><h2>System monitoring</h2><p>Browser-observed Supabase RPC and Edge Function timings from this admin session. This is not a synthetic global uptime monitor.</p></div><div className="admin-actions-inline"><span className="admin-pill success">{monitorUpdatedAt ? `Updated ${new Date(monitorUpdatedAt).toLocaleTimeString('en-NG')}` : 'Waiting for checks'}</span><button className="secondary" onClick={() => void runMonitoringChecks()} disabled={monitorLoading}><RefreshCw size={14} className={monitorLoading ? 'spin' : ''} />{monitorLoading ? 'Checking…' : 'Refresh checks'}</button></div></div>{monitorError && <div className="form-error" role="alert">{monitorError}</div>}<div className="admin-monitor-grid">{monitorMetrics.map((metric) => <article className="admin-monitor-card" key={metric.name}><div className="admin-card-label">{metric.name}</div><strong>{metric.latency == null ? '—' : `${metric.latency} ms`}</strong><span className={`admin-status ${metric.status === 'ok' ? 'active' : ''}`}>{metric.status === 'ok' ? 'Healthy response' : 'Request failed'}</span><small>{metric.detail}</small></article>)}</div>{monitorLoading && <div className="admin-line-skeleton"><Skeleton /><Skeleton /><Skeleton /></div>}<div className="monitoring-notes"><Wifi size={16} /><span>Checks refresh every 30 seconds while this page is visible. High latency can also come from the current device, browser, or network.</span></div></section>
     if (section === 'Settings') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Admin settings</h2><p>Profile and environment-safe controls for this console.</p></div></div><div className="admin-settings"><div><span className="admin-card-label">Signed-in account</span><strong>{email}</strong></div><div><span className="admin-card-label">Access model</span><strong>Platform admin role + Supabase RLS</strong></div><div><span className="admin-card-label">Revenue</span><strong>Unavailable until billing is implemented</strong></div></div></section>
     if (section === 'Audit log') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Audit log</h2><p>Unified activity from Supabase platform controls, project business records, and the connected GitHub repository.</p></div><span className="admin-pill success">{auditLoading ? 'Loading activity' : `${auditEntries.length} events`}</span></div>{auditError ? <div className="form-error" role="alert">{auditError}. Deploy list-platform-audit and refresh.</div> : auditLoading ? <div className="admin-table-skeleton">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="admin-skeleton-row"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>)}</div> : !auditEntries.length ? <div className="admin-empty">No audit activity found.</div> : <div className="audit-timeline">{auditEntries.map((entry) => <article className="audit-event" key={`${entry.source}-${entry.id}`}><div className="audit-event-marker"><History size={15} /></div><div className="audit-event-body"><div className="audit-event-meta"><span className={`audit-source ${entry.source.toLowerCase().replace(' ', '-')}`}>{entry.source}</span><time>{formatAdminValue('created_at', entry.createdAt)}</time></div><h3>{entry.action}</h3><p>{entry.target}{entry.organizationId ? ` · ${entry.organizationId}` : ''}</p><small>{entry.actor ?? 'System'}</small></div></article>)}</div>}</section>
-    if (section === 'Notifications') return <><section className="admin-card wide"><div className="admin-card-header"><div><h2>Send broadcast</h2><p>Broadcasts are authorized, fanned out to user notification centers, and audited by the database.</p></div></div><form className="admin-form" onSubmit={sendNotification}><label>Title<input required value={notificationTitle} onChange={(event) => setNotificationTitle(event.target.value)} placeholder="Scheduled maintenance" /></label><label>Message<textarea required value={notificationMessage} onChange={(event) => setNotificationMessage(event.target.value)} placeholder="Write the message users should receive." /></label><button className="primary" type="submit">Send broadcast</button>{notificationStatus && <p className="muted" role="status">{notificationStatus}</p>}    </form></section><section className="admin-card wide"><div className="admin-card-header"><div><h2>Publish a version</h2><p>Version announcements use the same trusted database fan-out as broadcasts.</p></div></div><form className="admin-form" onSubmit={publishVersion}><label>Version<input required value={version} onChange={(event) => setVersion(event.target.value)} placeholder="1.1.0" /></label><label>Message<textarea required value={versionMessage} onChange={(event) => setVersionMessage(event.target.value)} placeholder="What changed in this release?" /></label><button className="primary" type="submit">Publish announcement</button></form><div className="admin-version-history">{versionHistory.length ? versionHistory.map((item) => <article className="admin-version-entry" key={item.id}><div><strong>v{item.version}</strong><time>{new Date(item.created_at).toLocaleString('en-NG')}</time></div><p>{item.message}</p></article>) : <p className="admin-empty">No version announcements yet.</p>}</div></section><section className="admin-card wide"><div className="admin-card-header"><div><h2>Notification history</h2><p>Broadcasts recorded in the platform audit trail.</p></div></div>{renderRows()}</section></>
+    if (section === 'Notifications') return <><section className="admin-card wide"><div className="admin-card-header"><div><h2>Send broadcast</h2><p>Broadcasts are authorized, fanned out to user notification centers, and audited by the database.</p></div></div>    <form className="admin-form" onSubmit={sendNotification}><label>Title<input required value={notificationTitle} onChange={(event) => setNotificationTitle(event.target.value)} placeholder="Scheduled maintenance" /></label><label>Message<textarea required value={notificationMessage} onChange={(event) => setNotificationMessage(event.target.value)} placeholder="Write the message users should receive." /></label><button className="primary" type="submit" disabled={notificationBusy}>{notificationBusy ? 'Sending…' : 'Send broadcast'}</button>{notificationStatus && <p className="muted" role="status">{notificationStatus}</p>}    </form></section><section className="admin-card wide"><div className="admin-card-header"><div><h2>Publish a version</h2><p>Version announcements use the same trusted database fan-out as broadcasts.</p></div></div><form className="admin-form" onSubmit={publishVersion}><label>Version<input required value={version} onChange={(event) => setVersion(event.target.value)} placeholder="1.1.0" /></label><label>Message<textarea required value={versionMessage} onChange={(event) => setVersionMessage(event.target.value)} placeholder="What changed in this release?" /></label>    <button className="primary" type="submit" disabled={notificationBusy}>{notificationBusy ? 'Publishing…' : 'Publish announcement'}</button></form><div className="admin-version-history">{versionHistory.length ? versionHistory.map((item) => <article className="admin-version-entry" key={item.id}><div><strong>v{item.version}</strong><time>{new Date(item.created_at).toLocaleString('en-NG')}</time></div><p>{item.message}</p></article>) : <p className="admin-empty">No version announcements yet.</p>}</div></section><section className="admin-card wide"><div className="admin-card-header"><div><h2>Notification history</h2><p>Broadcasts recorded in the platform audit trail.</p></div></div>{renderRows()}</section></>
     return <section className="admin-card wide"><div className="admin-card-header"><div><h2>{section}</h2><p>Live records from the shared Supabase backend.</p></div><button className="secondary" onClick={() => setSection('Overview')}>Back to overview</button></div>{renderRows()}</section>
   }
   const toggleSidebar = () => {
@@ -588,9 +631,15 @@ function NotificationCenter({ userId, orgId }: { userId: string; orgId: string }
         if (incoming.organization_id && incoming.organization_id !== orgId) return
         setRows((current) => current.some((row) => row.id === incoming.id) ? current : [incoming, ...current].slice(0, 30))
       })
-      .subscribe()
-    return () => { void client.removeChannel(channel) }
-  }, [orgId, userId])
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setError('')
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setError('Live notifications are reconnecting…')
+      })
+    const refresh = () => { if (document.visibilityState === 'visible' && navigator.onLine) void load() }
+    window.addEventListener('online', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => { window.removeEventListener('online', refresh); document.removeEventListener('visibilitychange', refresh); void client.removeChannel(channel) }
+  }, [load, orgId, userId])
   useEffect(() => {
     if (!open) return
     const closeOnOutsidePress = (event: PointerEvent) => {
