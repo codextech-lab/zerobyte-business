@@ -585,6 +585,14 @@ td:last-child, th:last-child { padding-right: 0; }
 .activity-list .list-row { min-height: 58px; }
 .activity-footnote { margin: 12px 0 0; color: var(--muted); font-size: 11px; }
 .record-tabs { display: flex; gap: 8px; margin: 18px 0 14px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow-x: auto; }
+.record-filter-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-bottom: 18px; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+.record-filter-bar label { display: grid; gap: 6px; min-width: 150px; color: var(--muted); font-size: 11px; }
+.record-filter-bar input, .record-filter-bar select { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; color: inherit; background: var(--panel); }
+.record-actions { display: flex; align-items: center; gap: 8px; }
+.record-actions .secondary { min-height: 34px; padding: 7px 10px; font-size: 11px; }
+.guide-list { display: grid; gap: 10px; margin-top: 14px; }
+.guide-list p { margin: 0; padding: 10px 12px; border-left: 2px solid #06b6d4; color: var(--muted); font-size: 12px; line-height: 1.6; background: rgba(6,182,212,.04); }
+.guide-list strong { color: var(--text); }
 .record-tab { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 15px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; white-space: nowrap; font: inherit; font-size: 12px; cursor: pointer; transition: color .2s ease, background .2s ease, transform .2s ease; }
 .record-tab:hover { color: var(--text); transform: translateY(-1px); }
 .record-tab.active { color: #e9fbff; background: linear-gradient(135deg, #12394a, #102631); box-shadow: inset 0 0 0 1px #1d6070; }
