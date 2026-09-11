@@ -894,7 +894,7 @@ function Records({ orgId, search }: { orgId: string; search: string }) {
     { id: 'expenses', label: 'Expenses', icon: Wallet },
     { id: 'stock', label: 'Stock intake', icon: Package },
   ]
-  return <div className="page"><PageIntro label="Records" title="Keep the paper trail together." description="Review completed sales, operating expenses, and stock received from one focused workspace." /><div className="record-tabs" role="tablist" aria-label="Business records">{tabs.map(({ id, label, icon: Icon }) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'record-tab active' : 'record-tab'} onClick={() => setTab(id)}><Icon size={16} />{label}</button>)}</div>{tab === 'sales' ? <SalesRecords orgId={orgId} search={search} /> : tab === 'expenses' ? <Expenses orgId={orgId} /> : <StockIntake orgId={orgId} />}</div>
+  return <div className="page"><PageIntro label="Records" title="Keep the paper trail together." description="Review completed sales, operating expenses, and stock received from one focused workspace. Use Sales, Expenses, or Inventory when you need to add a new record." /><div className="record-tabs" role="tablist" aria-label="Business records">{tabs.map(({ id, label, icon: Icon }) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'record-tab active' : 'record-tab'} onClick={() => setTab(id)}><Icon size={16} />{label}</button>)}</div>{tab === 'sales' ? <SalesRecords orgId={orgId} search={search} /> : tab === 'expenses' ? <ExpenseRecords orgId={orgId} /> : <StockRecords orgId={orgId} />}</div>
 }
 
 function SalesRecords({ orgId, search }: { orgId: string; search: string }) {
@@ -912,29 +912,34 @@ function SalesRecords({ orgId, search }: { orgId: string; search: string }) {
   return <section className="panel table-panel records-panel"><div className="panel-heading"><div><span className="section-label">Completed activity</span><h2>{filtered.length} sale{filtered.length === 1 ? '' : 's'}</h2></div><span className="record-count">Latest 100</span></div>{error && <div className="form-error">{error}</div>}{filtered.length ? <div className="table-wrap"><table><thead><tr><th>Sale</th><th>Customer</th><th>Status</th><th>Date</th><th>Total</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td className="mono">#{row.id.slice(0, 8)}</td><td>{customerName(row)}</td><td><span className="status completed">{row.status}</span></td><td>{new Date(row.created_at).toLocaleString('en-NG')}</td><td className="amount">₦{Number(row.total).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No sales records yet" text="Completed sales will appear here after you record them." />}</section>
 }
 
-function StockIntake({ orgId }: { orgId: string }) {
+function ExpenseRecords({ orgId }: { orgId: string }) {
+  const [rows, setRows] = useState<{ id: string; title: string; category: string; amount: number; expense_date: string }[]>([])
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    if (!supabase) return
+    const { data, error: result } = await supabase.from('expenses').select('id,title,category,amount,expense_date').eq('organization_id', orgId).order('expense_date', { ascending: false }).limit(100)
+    if (result) setError('Expense records are temporarily unavailable.')
+    else setRows(data ?? [])
+  }, [orgId])
+  useEffect(() => { void load() }, [load])
+  return <section className="panel table-panel records-panel"><div className="panel-heading"><div><span className="section-label">Operating history</span><h2>{rows.length} expense{rows.length === 1 ? '' : 's'}</h2></div><span className="record-count">Latest 100</span></div>{error && <div className="form-error">{error}</div>}{rows.length ? <div className="table-wrap"><table><thead><tr><th>Expense</th><th>Category</th><th>Date</th><th>Amount</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.title}</strong></td><td>{row.category}</td><td>{row.expense_date}</td><td className="amount">₦{Number(row.amount).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No expense records yet" text="Expenses you add from the Expenses page will appear here." />}</section>
+}
+
+function StockRecords({ orgId }: { orgId: string }) {
   const [products, setProducts] = useState<ProductRow[]>([])
   const [movements, setMovements] = useState<{ id: string; product_id: string; quantity: number; movement_type: string; created_at: string }[]>([])
-  const [form, setForm] = useState({ productId: '', quantity: '', cost: '', selling: '' })
-  const [message, setMessage] = useState(''); const [error, setError] = useState('')
+  const [error, setError] = useState('')
   const load = useCallback(async () => {
     if (!supabase) return
     const [productResult, movementResult] = await Promise.all([
       supabase.from('products').select('id,name,sku,stock,price').eq('organization_id', orgId).order('name'),
-      supabase.from('stock_movements').select('id,product_id,quantity,movement_type,created_at').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(100),
+      supabase.from('stock_movements').select('id,product_id,quantity,movement_type,created_at').eq('organization_id', orgId).gt('quantity', 0).order('created_at', { ascending: false }).limit(100),
     ])
+    if (productResult.error || movementResult.error) setError('Stock records are temporarily unavailable.')
     setProducts(productResult.data ?? []); setMovements(movementResult.data ?? [])
   }, [orgId])
   useEffect(() => { void load() }, [load])
-  async function receive(event: React.FormEvent) {
-    event.preventDefault(); setError(''); setMessage('')
-    if (!navigator.onLine) { setError('Stock intake needs a live connection. Reconnect before receiving inventory.'); return }
-    if (!supabase) return
-    const { error: result } = await supabase.rpc('receive_stock', { target_org: orgId, target_product: form.productId, quantity_to_add: Number(form.quantity), new_cost: form.cost ? Number(form.cost) : null, new_selling: form.selling ? Number(form.selling) : null, target_branch: null })
-    if (result) setError(result.message)
-    else { setForm({ productId: '', quantity: '', cost: '', selling: '' }); setMessage('Stock received and inventory updated.'); void load() }
-  }
-  return <><form className="panel record-form stock-intake-form" onSubmit={receive}><div className="receive-heading"><span className="section-label">Server-verified intake</span><h2>Receive stock</h2><p>Each intake is recorded as a stock movement and updates the product balance.</p></div><label>Product<select required value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}><option value="">Choose product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.stock} units</option>)}</select></label><label>Quantity<input required type="number" min="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label><label>New cost<input type="number" min="0" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} placeholder="Optional" /></label><label>New selling price<input type="number" min="0" value={form.selling} onChange={(e) => setForm({ ...form, selling: e.target.value })} placeholder="Optional" /></label><button className="primary" disabled={!navigator.onLine}><Plus size={16} /> Receive stock</button>{message && <div className="form-success">{message}</div>}{error && <div className="form-error">{error}</div>}</form><section className="panel table-panel"><div className="panel-heading"><div><span className="section-label">Inventory trail</span><h2>Recent intake movements</h2></div></div>{movements.length ? <div className="table-wrap"><table><thead><tr><th>Product</th><th>Movement</th><th>Quantity</th><th>Date</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id}><td>{products.find((product) => product.id === movement.product_id)?.name || 'Product'}</td><td><span className="status completed">{movement.movement_type}</span></td><td className="stock-low">+{movement.quantity}</td><td>{new Date(movement.created_at).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No stock intake yet" text="Received inventory will appear here with its movement history." />}</section></>
+  return <section className="panel table-panel records-panel"><div className="panel-heading"><div><span className="section-label">Inventory history</span><h2>{movements.length} intake record{movements.length === 1 ? '' : 's'}</h2></div><span className="record-count">Latest 100</span></div>{error && <div className="form-error">{error}</div>}{movements.length ? <div className="table-wrap"><table><thead><tr><th>Product</th><th>Movement</th><th>Quantity</th><th>Date</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id}><td>{products.find((product) => product.id === movement.product_id)?.name || 'Product'}</td><td><span className="status completed">{movement.movement_type}</span></td><td className="stock-low">+{movement.quantity}</td><td>{new Date(movement.created_at).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No stock-intake records yet" text="Stock you receive from the Inventory page will appear here." />}</section>
 }
 
 function Sales({ orgId, scope }: { orgId: string; scope: OfflineScope | null }) {
