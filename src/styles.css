@@ -578,6 +578,9 @@ td:last-child, th:last-child { padding-right: 0; }
 .row-icon.sale { color: #54d995; background: #123b35; }
 .warning-text { color: #f0b665; }
 .quiet-empty { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; padding: 18px 0 3px; }
+.empty-inline { display: grid; gap: 8px; padding: 26px 8px; color: var(--muted); line-height: 1.5; }
+.empty-inline strong { color: var(--text); font-size: 14px; }
+.empty-inline span { font-size: 12px; }
 .activity-panel { margin-top: 18px; }
 .activity-list { max-height: 340px; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; }
 .activity-list .list-row { min-height: 58px; }
@@ -610,6 +613,17 @@ td:last-child, th:last-child { padding-right: 0; }
 .settings-info { max-width: 680px; margin-top: 18px; }
 .settings-info h2 { font-size: 18px; margin-top: 10px; }
 .settings-info p { color: var(--muted); line-height: 1.7; max-width: 560px; font-size: 13px; }
+.settings-preferences, .settings-security { max-width: 680px; margin-top: 18px; }
+.settings-preferences h2, .settings-security h2 { font-size: 18px; margin-top: 10px; }
+.settings-preferences p, .settings-security > p { color: var(--muted); line-height: 1.7; max-width: 560px; font-size: 13px; }
+.settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); cursor: pointer; }
+.settings-toggle-row span { display: grid; gap: 4px; }
+.settings-toggle-row strong { font-size: 13px; }
+.settings-toggle-row small { color: var(--muted); font-size: 11px; }
+.settings-toggle-row input { width: 42px; height: 24px; margin: 0; accent-color: var(--cyan); }
+.settings-security-form { display: grid; gap: 12px; max-width: 430px; margin-top: 18px; }
+.settings-security-form label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; }
+.settings-security-form input { padding: 11px; border: 1px solid var(--line); border-radius: 8px; color: inherit; background: transparent; }
 .report-note { margin-top: 20px; max-width: 680px; }
 .report-note h2 { margin: 14px 0 4px; font-size: 16px; }
 .report-note strong { display: block; font-size: 36px; letter-spacing: -.06em; }
