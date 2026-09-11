@@ -3,6 +3,7 @@ export type View =
   | 'Inventory'
   | 'Customers'
   | 'Sales'
+  | 'Records'
   | 'Receipts'
   | 'Invoices'
   | 'Expenses'
