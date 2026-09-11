@@ -65,8 +65,8 @@ For separate hosting, deploy the same production output to two sites: configure 
 
 The included GitHub Pages workflow publishes both entry points from one Pages deployment. It configures the Pages base path before building, so Vite assets, client routes, and the service worker stay under the repository path (or `/` for a custom-domain Pages site):
 
-- User app: `https://codextech-lab.github.io/zerobyte-business/`
-- Admin console: `https://codextech-lab.github.io/zerobyte-business/admin.html`
+- User app: `https://codex-tech-foundation-X-zerobyte.github.io/zerobyte-business/`
+- Admin console: `https://codex-tech-foundation-X-zerobyte.github.io/zerobyte-business/admin.html`
 
 Configure the repository Actions secrets `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_ADMIN_EMAILS` before deploying.
 
