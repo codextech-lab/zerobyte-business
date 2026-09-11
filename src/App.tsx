@@ -961,7 +961,14 @@ function Inventory({ orgId, search }: { orgId: string; search: string }) {
     const openingStock = Number(form.stock)
     const payload = { name: form.name, sku: form.sku, category: form.category || 'Uncategorized', price: Number(form.price) }
     if (editing) {
-      const result = await supabase.from('products').update(payload).eq('id', editing).eq('organization_id', orgId)
+      const result = await supabase.rpc('update_product_catalog', {
+        target_org: orgId,
+        target_product: editing,
+        product_name: payload.name,
+        product_sku: payload.sku,
+        product_category: payload.category,
+        selling_price: payload.price,
+      })
       if (result.error) setError(result.error.code === '23505' ? 'That SKU is already in use in this workspace.' : result.error.message)
       else { setForm({ name: '', sku: '', category: '', price: '', cost: '', stock: '' }); setEditing(null); load() }
       return
