@@ -161,6 +161,34 @@ async function updateOperation(operation: OfflineOperation) {
 export async function clearOfflineUserData(userId: string) {
   try {
     const db = await openDatabase()
+    const pending = await new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction(['syncQueue', 'drafts'], 'readonly')
+      const request = tx.objectStore('syncQueue').index('user').openCursor(userId)
+      let hasPending = false
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (cursor) {
+          const operation = cursor.value as OfflineOperation
+          if (operation.status !== 'succeeded') hasPending = true
+          cursor.continue()
+          return
+        }
+        const drafts = tx.objectStore('drafts').openCursor()
+        drafts.onsuccess = () => {
+          const draft = drafts.result
+          if (draft) {
+            const value = draft.value as { scope?: string }
+            if (value.scope?.startsWith(`${userId}:`)) hasPending = true
+            draft.continue()
+          }
+        }
+      }
+      tx.oncomplete = () => resolve(hasPending)
+      tx.onerror = () => reject(tx.error)
+    })
+    // A normal logout must never destroy an operation which has not reached
+    // the server. The user can explicitly discard it through the UI.
+    if (pending) return false
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(['cache', 'drafts', 'syncQueue'], 'readwrite')
       ;(['cache', 'drafts', 'syncQueue'] as const).forEach((name) => {
@@ -178,13 +206,63 @@ export async function clearOfflineUserData(userId: string) {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
+    return true
   } catch {
     // Offline persistence is best-effort; a browser without IndexedDB should still run online.
+    return false
   }
 }
 
-function isConflict(error: Error) {
-  return /insufficient stock|does not belong|not authorized|select one|unsupported|must be|already exists/i.test(error.message)
+export async function discardOfflineUserData(userId: string) {
+  try {
+    const db = await openDatabase()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['cache', 'drafts', 'syncQueue'], 'readwrite')
+      ;(['cache', 'drafts', 'syncQueue'] as const).forEach((name) => {
+        const store = tx.objectStore(name)
+        const request = name === 'syncQueue' ? store.index('user').openCursor(userId) : store.openCursor()
+        request.onsuccess = () => {
+          const cursor = request.result
+          if (!cursor) return
+          const value = cursor.value as { scope?: string; userId?: string }
+          if (name === 'syncQueue' ? value.userId === userId : value.scope?.startsWith(`${userId}:`)) cursor.delete()
+          cursor.continue()
+        }
+      })
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch {
+    // Best effort cleanup.
+  }
+}
+
+type SyncError = Error & { code?: string; details?: string; hint?: string }
+
+function structuredError(reason: unknown): { code: string; message: string } {
+  const error = reason as SyncError
+  const raw = [error?.details, error?.hint, error?.message].find(Boolean) ?? ''
+  try {
+    const parsed = JSON.parse(raw) as { code?: string; message?: string }
+    if (parsed.code) return { code: parsed.code, message: parsed.message ?? parsed.code }
+  } catch {
+    // Older RPCs may return a plain message; classify it as unknown rather
+    // than treating user-facing English text as an authorization signal.
+  }
+  return { code: error?.code?.toUpperCase() || 'SYNC_ERROR', message: raw || 'Could not sync this operation.' }
+}
+
+function isConflictCode(code: string) {
+  return new Set([
+    'INSUFFICIENT_STOCK',
+    'BRANCH_ACCESS_DENIED',
+    'ORGANIZATION_ACCESS_DENIED',
+    'PRODUCT_NOT_FOUND',
+    'CUSTOMER_NOT_FOUND',
+    'SALE_ALREADY_PROCESSED',
+    'OPERATION_CONFLICT',
+    'VALIDATION_ERROR',
+  ]).has(code)
 }
 
 export async function syncOfflineQueue(client: SupabaseClient, scope: OfflineScope) {
@@ -197,10 +275,10 @@ export async function syncOfflineQueue(client: SupabaseClient, scope: OfflineSco
     try {
       if (operation.kind === 'sale') {
         const { error } = await client.rpc('create_sale_with_operation', { ...operation.payload, operation_id: operation.operationId })
-        if (error) throw new Error(error.message)
+        if (error) throw error
       } else {
         const { data, error } = await client.rpc('create_customer_with_operation', { ...operation.payload, operation_id: operation.operationId })
-        if (error) throw new Error(error.message)
+        if (error) throw error
         if (data) {
           const customers = await readScopedCache<Record<string, unknown> & { id: string }>(scope, 'customers')
           const pendingId = String(operation.payload.client_id ?? '')
@@ -210,9 +288,9 @@ export async function syncOfflineQueue(client: SupabaseClient, scope: OfflineSco
       await updateOperation({ ...inFlight, status: 'succeeded', updatedAt: new Date().toISOString() })
       processed += 1
     } catch (reason) {
-      const error = reason instanceof Error ? reason : new Error('Could not sync operation')
-      const conflict = isConflict(error)
-      await updateOperation({ ...inFlight, status: conflict ? 'conflict' : inFlight.retries >= 4 ? 'failed' : 'pending', retries: inFlight.retries + 1, lastError: error.message, updatedAt: new Date().toISOString() })
+      const error = structuredError(reason)
+      const conflict = isConflictCode(error.code)
+      await updateOperation({ ...inFlight, status: conflict ? 'conflict' : inFlight.retries >= 4 ? 'failed' : 'pending', retries: inFlight.retries + 1, lastError: `${error.code}: ${error.message}`, updatedAt: new Date().toISOString() })
       if (!conflict && inFlight.retries < 4) break
     }
   }

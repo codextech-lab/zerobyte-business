@@ -16,15 +16,45 @@ serve(async (request) => {
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   if (!url || !anonKey || !serviceRoleKey) return json({ error: 'Server configuration is incomplete' }, 500)
-  let body: { employeeId?: string; password?: string }
+  let body: { identifier?: string; employeeId?: string; password?: string }
   try { body = await request.json() } catch { return json({ error: 'Request body must be valid JSON' }, 400) }
-  const employeeId = body.employeeId?.trim()
+  const identifier = (body.identifier ?? body.employeeId)?.trim()
   const password = body.password
-  if (!employeeId || !password) return json({ error: 'Employee ID and password are required' }, 400)
+  if (!identifier || !password) return json({ error: 'Worker identifier and password are required' }, 400)
   const adminClient = createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
-  const { data: employee, error } = await adminClient.from('employee_profiles').select('email,employment_status').eq('employee_id', employeeId).maybeSingle()
-  if (error) return json({ error: error.message }, 500)
-  if (!employee?.email || employee.employment_status !== 'active') return json({ error: 'Invalid worker credentials' }, 401)
+  const field = identifier.includes('@') ? 'email' : 'employee_id'
+  const lookupValue = identifier.replace(/[\\%_]/g, '\\$&')
+  const { data: employees, error } = await adminClient
+    .from('employee_profiles')
+    .select('email,employment_status,user_id,organization_id,branch_id')
+    .ilike(field, lookupValue)
+    .eq('employment_status', 'active')
+    .not('user_id', 'is', null)
+    .limit(2)
+  // Deliberately return the same response for missing and ambiguous identities.
+  // This prevents employee enumeration and makes per-organization ID collisions
+  // harmless until an administrator resolves them.
+  if (error || !employees || employees.length !== 1) return json({ error: 'Invalid worker credentials' }, 401)
+  const employee = employees[0]
+  if (!employee.email) return json({ error: 'Invalid worker credentials' }, 401)
+  const { data: membership } = await adminClient
+    .from('organization_members')
+    .select('organization_id')
+    .eq('organization_id', employee.organization_id)
+    .eq('user_id', employee.user_id)
+    .eq('role', 'member')
+    .maybeSingle()
+  if (!membership) return json({ error: 'Invalid worker credentials' }, 401)
+  if (employee.branch_id) {
+    const { data: branch } = await adminClient
+      .from('branches')
+      .select('id')
+      .eq('id', employee.branch_id)
+      .eq('organization_id', employee.organization_id)
+      .eq('status', 'active')
+      .maybeSingle()
+    if (!branch) return json({ error: 'Invalid worker credentials' }, 401)
+  }
   const authClient = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } })
   const { data, error: signInError } = await authClient.auth.signInWithPassword({ email: employee.email, password })
   if (signInError || !data.session) return json({ error: 'Invalid worker credentials' }, 401)

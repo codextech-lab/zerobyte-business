@@ -43,6 +43,10 @@ export async function getCurrentUserContext(client: SupabaseClient) {
     .eq('user_id', user.id)
     .maybeSingle()
   if (employeeError) throw employeeError
+  if (employee && employee.employment_status !== 'active') {
+    await client.auth.signOut()
+    throw new Error('This worker account is no longer active. Contact an organization administrator.')
+  }
   return {
     userId: user.id,
     email: user.email ?? '',

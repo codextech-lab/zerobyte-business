@@ -15,7 +15,11 @@ For a fresh checkout, copy `.env.example` to `.env.local`, add the project URL a
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Apply the migrations in `supabase/migrations/` with the Supabase CLI or SQL editor.
+2. Link the local checkout to that project and apply every migration (including the dashboard RPC):
+   ```bash
+   supabase link --project-ref <PROJECT_REF>
+   supabase db push --linked --include-all
+   ```
 3. Deploy the authenticated functions:
    ```bash
    supabase functions deploy create-sale
@@ -59,12 +63,14 @@ The repository includes a dedicated `admin.html` application entry plus the prot
 
 For separate hosting, deploy the same production output to two sites: configure the user site to serve `index.html` and the admin site to serve `admin.html`. Both sites share the same Supabase project, while the admin site remains protected by the server-side platform-admin checks used by the Edge Functions and database RPCs.
 
-The included GitHub Pages workflow publishes both entry points from one Pages deployment:
+The included GitHub Pages workflow publishes both entry points from one Pages deployment. It configures the Pages base path before building, so Vite assets, client routes, and the service worker stay under the repository path (or `/` for a custom-domain Pages site):
 
 - User app: `https://codextech-lab.github.io/zerobyte-business/`
 - Admin console: `https://codextech-lab.github.io/zerobyte-business/admin.html`
 
 Configure the repository Actions secrets `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_ADMIN_EMAILS` before deploying.
+
+The user app manifest uses relative `start_url`/`scope` values and includes Android-sized PNG icons. The service worker is scoped to the generated base path and only caches the public app shell; Supabase/API responses are never cached. If a previously installed PWA shows an old shell after deployment, uninstall it once or clear its site storage so the versioned worker can take control.
 
 ## Architecture
 

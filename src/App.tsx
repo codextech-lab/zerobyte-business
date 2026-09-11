@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ArrowRight, BarChart3, Bell, Check, ChevronRight, CircleHelp, ClipboardList, FileText, GitBranch, History, LayoutDashboard,
-  LogOut, Menu, Package, PanelLeftClose, PanelLeftOpen, Plus, Receipt, Search, Settings, ShoppingCart, ShieldCheck, Users, Wallet, X,
+  LogOut, Menu, Package, PanelLeftClose, PanelLeftOpen, Plus, Receipt, Search, Settings, ShoppingCart, ShieldCheck, UserRound, Users, Wallet, X,
 } from 'lucide-react'
 import { adminSupabase, isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase'
 import { getCurrentUserContext } from './lib/identity'
 import {
-  clearOfflineUserData, clearSaleDraft, enqueueOfflineOperation, newOfflineOperationId, readSaleDraft,
+  clearOfflineUserData, discardOfflineUserData, clearSaleDraft, enqueueOfflineOperation, newOfflineOperationId, readSaleDraft,
   readOfflineOperations, readScopedCache, saveSaleDraft, syncOfflineQueue, writeScopedCache,
   type OfflineScope,
 } from './lib/offline'
 import type { View } from './lib/types'
+import { appPath, appRoute, navigateTo } from './lib/routing'
 
 const navGroups = [
   { label: 'Run the business', items: [{ name: 'Overview', icon: LayoutDashboard }, { name: 'Sales', icon: ShoppingCart }, { name: 'Inventory', icon: Package }, { name: 'Customers', icon: Users }] },
@@ -20,15 +21,6 @@ const navGroups = [
 type ProductRow = { id: string; name: string; sku: string; stock: number; price: number; category?: string }
 type CustomerRow = { id: string; name: string; email: string | null; phone: string | null }
 type OrganizationRow = { id: string; name: string }
-
-const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS ?? '')
-  .split(',')
-  .map((value: string) => value.trim().toLowerCase())
-  .filter(Boolean)
-
-function isAdminEmail(email: string) {
-  return adminEmails.includes(email.trim().toLowerCase())
-}
 
 function Skeleton({ className = '' }: { className?: string }) {
   return <span className={`skeleton ${className}`} aria-hidden="true" />
@@ -84,17 +76,21 @@ function OfflineStatus({ scope }: { scope: OfflineScope | null }) {
 
 function App() {
   const [sessionReady, setSessionReady] = useState(false); const [signedIn, setSignedIn] = useState(false); const [email, setEmail] = useState(''); const [displayName, setDisplayName] = useState('')
-  const isAdminPath = (pathname: string) => pathname === '/admin' || pathname.endsWith('/admin') || pathname.endsWith('/admin.html')
+  const [adminAuthorized, setAdminAuthorized] = useState(false)
+  const isAdminPath = (pathname: string) => {
+    const route = appRoute(pathname)
+    return route === '/admin' || route === '/admin.html'
+  }
   const adminEntry = document.documentElement.dataset.zerobyteApp === 'admin' || isAdminPath(window.location.pathname)
-  const [path, setPath] = useState(adminEntry ? '/admin' : window.location.pathname)
+  const [path, setPath] = useState(adminEntry ? '/admin' : appRoute())
 
   const navigate = (nextPath: string) => {
-    window.history.pushState({}, '', nextPath)
+    navigateTo(nextPath)
     setPath(nextPath)
   }
 
   useEffect(() => {
-    const onPopState = () => setPath(isAdminPath(window.location.pathname) ? '/admin' : window.location.pathname)
+    const onPopState = () => setPath(isAdminPath(window.location.pathname) ? '/admin' : appRoute())
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
@@ -105,36 +101,32 @@ function App() {
     authClient.auth.getSession().then(({ data }) => {
       const hasSession = Boolean(data.session)
       setSignedIn(hasSession); setEmail(data.session?.user.email ?? ''); setDisplayName(data.session?.user.user_metadata?.full_name ?? data.session?.user.user_metadata?.name ?? '')
-      if (hasSession && window.location.pathname === '/auth') {
+      if (hasSession && appRoute() === '/auth') {
         navigate('/')
       }
-      if (hasSession && isAdminPath(window.location.pathname) && !isAdminEmail(data.session?.user.email ?? '')) {
-        setPath('/admin')
-      }
+      if (hasSession && adminEntry) void adminSupabase?.rpc('is_platform_admin').then(({ data: allowed }) => setAdminAuthorized(Boolean(allowed)))
       setSessionReady(true)
     })
     const { data } = authClient.auth.onAuthStateChange((_event, session) => {
       const hasSession = Boolean(session)
       setSignedIn(hasSession); setEmail(session?.user.email ?? ''); setDisplayName(session?.user.user_metadata?.full_name ?? session?.user.user_metadata?.name ?? '')
       if (hasSession) {
-        if (window.location.pathname === '/auth') {
+        if (appRoute() === '/auth') {
           navigate('/')
         }
-        if (isAdminPath(window.location.pathname) && !isAdminEmail(session?.user.email ?? '')) {
-          setPath('/admin')
-        }
+        if (adminEntry) void adminSupabase?.rpc('is_platform_admin').then(({ data: allowed }) => setAdminAuthorized(Boolean(allowed)))
       }
     })
     return () => data.subscription.unsubscribe()
   }, [adminEntry])
 
   if (!sessionReady) return <WorkspaceSkeleton />
-  if (path === '/terms' || path === '/privacy' || path === '/cookies') return <LegalPage type={path.slice(1) as 'terms' | 'privacy' | 'cookies'} />
+  if (path === '/terms' || path === '/privacy' || path === '/cookies') return <LegalPage type={path.slice(1) as 'terms' | 'privacy' | 'cookies'} navigate={navigate} />
   if (!isSupabaseConfigured) return <ConfigurationRequired />
   if (path === '/admin') {
     if (!isSupabaseConfigured) return <AdminConsoleUnavailable />
     if (!signedIn) return <AdminLogin />
-    if (!isAdminEmail(email)) return <AdminAccessDenied email={email} onBack={() => navigate('/')} />
+    if (!adminAuthorized) return <AdminAccessDenied email={email} onBack={() => navigate('/')} />
     return <AdminConsole email={email} onBack={() => navigate('/')} onLogout={() => { void adminSupabase?.auth.signOut(); window.localStorage.removeItem('zerobyte.admin-access'); navigate('/') }} />
   }
   if (!signedIn && path !== '/auth') return <Landing onStart={() => navigate('/auth')} />
@@ -143,7 +135,7 @@ function App() {
 }
 
 function Landing({ onStart }: { onStart: () => void }) {
-  return <div className="landing"><header className="landing-nav"><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>Business</small></div><div className="landing-nav-actions"><span>Built for Nigerian businesses</span><button className="text-btn" onClick={onStart}>Sign in <ArrowRight size={14} /></button></div></header><main className="landing-main"><section className="landing-hero"><div className="hero-copy"><span className="auth-kicker">The calm operating system for your business</span><h1>Run your business<br /><em>from one clear place.</em></h1><p>Sales, stock, customers and expenses — connected around the way Nigerian businesses actually work.</p><div className="hero-actions"><button className="primary hero-button" onClick={onStart}>Start for free <ArrowRight size={17} /></button><span className="hero-note">No payment details · Real records after sign-in</span></div></div><div className="hero-visual"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="hero-console"><div className="console-top"><span>zerøbyte / workspace</span><span className="live-dot">● secure</span></div><div className="console-total"><small>Your business data</small><strong>Connected records</strong><span>Nothing invented before you sign in</span></div><div className="console-bars"><i style={{ height: '34%' }} /><i style={{ height: '54%' }} /><i style={{ height: '43%' }} /><i style={{ height: '72%' }} /><i style={{ height: '62%' }} /><i style={{ height: '88%' }} /></div><div className="console-foot"><span><Package size={13} /> Stock & sales</span><span><Users size={13} /> Your team</span></div></div></div></section><section className="landing-proof"><div><strong>One workspace.</strong><span>Less switching, more knowing.</span></div><div><strong>Real records.</strong><span>Nothing invented for your dashboard.</span></div><div><strong>Made for naira.</strong><span>Prices and expenses in the language of home.</span></div></section><section className="landing-features"><div><span className="section-label">Everything in view</span><h2>Small business deserves<br />serious software.</h2><p className="landing-detail">Start with the work you already do: record a sale, update stock, keep customer details close, and understand where money is moving.</p></div><div className="feature-list"><div><Package /><strong>Inventory without guesswork</strong><p>Know what you have, what is low, and what needs restocking.</p></div><div><ShoppingCart /><strong>Sales that update stock</strong><p>Complete a sale once. Your records and inventory stay aligned.</p></div><div><BarChart3 /><strong>Reports you can trust</strong><p>See performance from the activity your team actually recorded.</p></div></div></section><section className="landing-data"><div><span className="section-label">Clear by default</span><h2>You stay in control of the records.</h2><p>We collect only what the workspace needs to authenticate users, organize business records, and keep actions auditable. No payment details are collected in V1.</p></div><div className="data-points"><span><Check size={16} /> Account identity and authentication details</span><span><Check size={16} /> Business, branch, product, customer and sales records you enter</span><span><Check size={16} /> Security, audit and attendance timestamps</span></div></section><InstallPrompt /></main><footer className="landing-footer"><span>Zerøbyte Business</span><span>Run the work. Keep the signal.</span><div className="legal-links"><a href="./privacy.html">Privacy</a><a href="./terms.html">Terms</a><a href="./cookies.html">Cookies</a></div></footer></div>
+  return <div className="landing"><header className="landing-nav"><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>Business</small></div><div className="landing-nav-actions"><span>Built for Nigerian businesses</span><button className="text-btn" onClick={onStart}>Sign in <ArrowRight size={14} /></button></div></header><main className="landing-main"><section className="landing-hero"><div className="hero-copy"><span className="auth-kicker">The calm operating system for your business</span><h1>Run your business<br /><em>from one clear place.</em></h1><p>Sales, stock, customers and expenses — connected around the way Nigerian businesses actually work.</p><div className="hero-actions"><button className="primary hero-button" onClick={onStart}>Start for free <ArrowRight size={17} /></button><span className="hero-note">No payment details · Real records after sign-in</span></div></div><div className="hero-visual"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="hero-console"><div className="console-top"><span>zerøbyte / workspace</span><span className="live-dot">● secure</span></div><div className="console-total"><small>Your business data</small><strong>Connected records</strong><span>Nothing invented before you sign in</span></div><div className="console-bars"><i style={{ height: '34%' }} /><i style={{ height: '54%' }} /><i style={{ height: '43%' }} /><i style={{ height: '72%' }} /><i style={{ height: '62%' }} /><i style={{ height: '88%' }} /></div><div className="console-foot"><span><Package size={13} /> Stock & sales</span><span><Users size={13} /> Your team</span></div></div></div></section><section className="landing-proof"><div><strong>One workspace.</strong><span>Less switching, more knowing.</span></div><div><strong>Real records.</strong><span>Nothing invented for your dashboard.</span></div><div><strong>Made for naira.</strong><span>Prices and expenses in the language of home.</span></div></section><section className="landing-features"><div><span className="section-label">Everything in view</span><h2>Small business deserves<br />serious software.</h2><p className="landing-detail">Start with the work you already do: record a sale, update stock, keep customer details close, and understand where money is moving.</p></div><div className="feature-list"><div><Package /><strong>Inventory without guesswork</strong><p>Know what you have, what is low, and what needs restocking.</p></div><div><ShoppingCart /><strong>Sales that update stock</strong><p>Complete a sale once. Your records and inventory stay aligned.</p></div><div><BarChart3 /><strong>Reports you can trust</strong><p>See performance from the activity your team actually recorded.</p></div></div></section><section className="landing-data"><div><span className="section-label">Clear by default</span><h2>You stay in control of the records.</h2><p>We collect only what the workspace needs to authenticate users, organize business records, and keep actions auditable. No payment details are collected in V1.</p></div><div className="data-points"><span><Check size={16} /> Account identity and authentication details</span><span><Check size={16} /> Business, branch, product, customer and sales records you enter</span><span><Check size={16} /> Security, audit and attendance timestamps</span></div></section><InstallPrompt /></main><footer className="landing-footer"><span>Zerøbyte Business</span><span>Run the work. Keep the signal.</span><div className="legal-links"><a href={appPath('/privacy')}>Privacy</a><a href={appPath('/terms')}>Terms</a><a href={appPath('/cookies')}>Cookies</a></div></footer></div>
 }
 
 function InstallPrompt() {
@@ -160,13 +152,13 @@ function InstallPrompt() {
   return <section className="install-strip"><div><strong>Take Zerøbyte with you</strong><p>Install the workspace on your device for a focused, app-like experience.</p></div><button className="secondary" onClick={async () => { await installEvent.prompt(); setInstallEvent(null) }}>Install app <ArrowRight size={15} /></button></section>
 }
 
-function LegalPage({ type }: { type: 'terms' | 'privacy' | 'cookies' }) {
+function LegalPage({ type, navigate }: { type: 'terms' | 'privacy' | 'cookies'; navigate: (path: string) => void }) {
   const content = {
     terms: { label: 'Terms of service', title: 'A clear agreement for using Zerøbyte.', intro: 'These V1 terms describe the basic rules for using Zerøbyte Business. They are product copy for this early release and should be reviewed by qualified counsel before a public commercial launch.', sections: [['Using the service', 'You may use Zerøbyte to manage lawful business records for an organization you are authorized to represent. Keep your login secure and do not attempt to access another organization’s data.'], ['Your content', 'Your organization owns the business information you enter. You are responsible for its accuracy, lawful collection, and the permissions of the people you invite.'], ['Availability and changes', 'Zerøbyte is evolving. Features may change, and we may suspend access where needed to protect users, the service, or the security of stored records.'], ['Payments', 'Payments and subscription billing are not implemented in this V1. No payment details are requested by the application.']] },
     privacy: { label: 'Privacy policy', title: 'Privacy that is easy to understand.', intro: 'This V1 privacy summary explains the data Zerøbyte is designed to collect, why it is used, and what is intentionally out of scope. It is not legal advice.', sections: [['Data we collect', 'Account data such as email address and authentication metadata; organization data such as business name, branches, roles and permissions; operational records such as products, stock, customers, sales, expenses, invoices and attendance; and security/audit timestamps needed to protect the workspace.'], ['How we use it', 'We use this information to authenticate you, show organization-scoped workspaces, process the records you request, enforce permissions, maintain auditability, and improve reliability.'], ['What we do not collect in V1', 'We do not collect card or bank payment details, we do not implement payment processing, and we do not use business records to create fake dashboard metrics or advertising profiles.'], ['Your choices', 'You can request correction or deletion of records through the organization owner. Account and platform deletion workflows should be completed with the service operator before production launch.']] },
     cookies: { label: 'Cookie notice', title: 'Small files, clearly explained.', intro: 'Zerøbyte uses the minimum browser storage needed for a reliable signed-in experience.', sections: [['Essential session storage', 'Supabase Auth uses browser storage to keep your signed-in session available between page refreshes. Without it, you would need to sign in again after every refresh.'], ['Organization-scoped offline storage', 'Authorized products, customers, persistent sale drafts, and sync operations are stored in IndexedDB under the signed-in account and organization scope. Business data is not stored in local storage.'], ['No advertising cookies', 'The V1 application does not use advertising, cross-site tracking, or analytics cookies.'], ['Managing storage', 'You can clear browser storage from your browser settings. Clearing essential session storage signs you out; clearing IndexedDB removes unsynced offline drafts and queued operations.']] },
   }[type]
-  return <div className="legal-shell"><header className="legal-nav"><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>Business</small></div><button className="text-btn" onClick={() => { window.location.pathname = '/auth' }}>Sign in <ArrowRight size={14} /></button></header><main className="legal-content"><span className="section-label">{content.label}</span><h1>{content.title}</h1><p className="legal-intro">{content.intro}</p><div className="legal-updated">V1 draft · Last updated September 2026</div>{content.sections.map(([heading, body]) => <section key={heading}><h2>{heading}</h2><p>{body}</p></section>)}</main><footer className="landing-footer legal-footer"><span>Zerøbyte Business</span><div className="legal-links"><button onClick={() => { window.location.pathname = '/privacy' }}>Privacy</button><button onClick={() => { window.location.pathname = '/terms' }}>Terms</button><button onClick={() => { window.location.pathname = '/cookies' }}>Cookies</button></div></footer></div>
+  return <div className="legal-shell"><header className="legal-nav"><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>Business</small></div><button className="text-btn" onClick={() => navigate('/auth')}>Sign in <ArrowRight size={14} /></button></header><main className="legal-content"><span className="section-label">{content.label}</span><h1>{content.title}</h1><p className="legal-intro">{content.intro}</p><div className="legal-updated">V1 draft · Last updated September 2026</div>{content.sections.map(([heading, body]) => <section key={heading}><h2>{heading}</h2><p>{body}</p></section>)}</main><footer className="landing-footer legal-footer"><span>Zerøbyte Business</span><div className="legal-links"><button onClick={() => navigate('/privacy')}>Privacy</button><button onClick={() => navigate('/terms')}>Terms</button><button onClick={() => navigate('/cookies')}>Cookies</button></div></footer></div>
 }
 
 function ConfigurationRequired() {
@@ -187,20 +179,20 @@ function AdminLogin() {
       return;
     }
     setLoading(true); setError('');
-    const { data, error: authError } = await adminSupabase.auth.signInWithPassword({ email, password });
+    const { error: authError } = await adminSupabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (authError) {
       setError(authError.message);
       return;
     }
-    const accountEmail = data.user?.email ?? email;
-    if (!isAdminEmail(accountEmail)) {
+    const { data: allowed, error: accessError } = await adminSupabase.rpc('is_platform_admin')
+    if (accessError || !allowed) {
       setError('This account does not have platform administrator access.');
       void adminSupabase.auth.signOut();
       return;
     }
     window.localStorage.setItem('zerobyte.admin-access', 'true');
-    window.location.href = `${window.location.pathname.endsWith('/admin.html') ? './admin.html' : './admin'}`;
+    window.location.href = appPath('/admin.html')
   }
 
   return <div className="auth-shell"><div className="auth-brand"><div className="brand-mark">ø</div><strong>Zerøbyte</strong><span>Admin Console</span></div><div className="auth-layout"><section className="auth-intro"><span className="auth-kicker">Platform operations</span><h1>Platform access<br /><em>restricted to approved admins.</em></h1><p>Only verified platform administrators can access the admin console. Business ownership, worker roles, and organization membership do not grant platform access.</p></section><form className="auth-card" onSubmit={handleSubmit}><span className="auth-kicker">Secure sign-in</span><h2>Admin login</h2><label>Email address<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@zerobyte.app" /></label><label>Password<input type="password" required minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary entry-button" disabled={loading}>{loading ? 'Authenticating…' : 'Enter admin console'}</button></form></div></div>
@@ -267,26 +259,29 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
   }, [analyticsPeriod])
   useEffect(() => {
     if (!adminSupabase || section === 'Overview' || section === 'Settings' || section === 'Users' || section === 'Audit log') return
-    const tableBySection: Record<Exclude<AdminSection, 'Overview' | 'Settings' | 'Users'>, string> = {
-      Organizations: 'organizations',
-      Branches: 'branches',
-      Inventory: 'products',
-      Sales: 'sales',
-      Notifications: 'admin_notifications',
-      'Audit log': 'admin_audit_logs',
-    }
+    const client = adminSupabase
     setRowsLoading(true)
     setRowsError('')
-    const table = tableBySection[section]
-    adminSupabase.from(table).select('*').order('created_at', { ascending: false }).limit(100).then(({ data, error }) => {
+    const loadRows = async () => {
+      const { data: sessionData, error: sessionError } = await client.auth.getSession()
+      if (sessionError || !sessionData.session || !supabaseUrl || !supabaseAnonKey) {
+        setRowsLoading(false)
+        setRowsError('Your admin session has expired. Sign out and sign in again.')
+        return
+      }
+      const response = await fetch(`${supabaseUrl}/functions/v1/get-platform-records?resource=${encodeURIComponent(section)}`, {
+        headers: { Authorization: `Bearer ${sessionData.session.access_token}`, apikey: supabaseAnonKey },
+      })
+      const payload = await response.json().catch(() => null)
       setRowsLoading(false)
-      if (error) {
-        setRowsError(error.message)
+      if (!response.ok) {
+        setRowsError(payload?.error ?? `Platform records returned ${response.status}.`)
         setRows([])
         return
       }
-      setRows((data ?? []) as AdminRow[])
-    })
+      setRows((payload?.rows ?? []) as unknown as AdminRow[])
+    }
+    void loadRows()
   }, [section])
   useEffect(() => {
     if (!adminSupabase || section !== 'Audit log' || !supabaseUrl || !supabaseAnonKey) return
@@ -380,13 +375,10 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     event.preventDefault()
     if (!adminSupabase || !notificationTitle.trim() || !notificationMessage.trim()) return
     setNotificationStatus('Sending…')
-    const { error } = await adminSupabase.from('admin_notifications').insert({
-      created_by: (await adminSupabase.auth.getUser()).data.user?.id,
-      title: notificationTitle.trim(),
-      message: notificationMessage.trim(),
-      status: 'sent',
-      sent_at: new Date().toISOString(),
-      audience: 'all_users',
+    const { error } = await adminSupabase.rpc('send_platform_broadcast', {
+      notification_title: notificationTitle.trim(),
+      notification_message: notificationMessage.trim(),
+      target_audience: 'all_users',
     })
     if (error) {
       setNotificationStatus(error.message)
@@ -394,7 +386,7 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     }
     setNotificationTitle('')
     setNotificationMessage('')
-    setNotificationStatus('Broadcast saved. Recipient delivery requires the notification fan-out function to be deployed.')
+    setNotificationStatus('Broadcast delivered to recipient notification centers and recorded in the audit log.')
     setRows((current) => [{ title: notificationTitle, message: notificationMessage, status: 'sent', created_at: new Date().toISOString() }, ...current])
   }
   const renderSection = () => {
@@ -407,7 +399,7 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     if (section === 'Users') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Users</h2><p>Platform accounts loaded through the protected Auth listing Edge Function.</p></div><span className="admin-pill success">Secure live view</span></div>{userRowsLoading ? <div className="admin-table-skeleton">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="admin-skeleton-row"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>)}</div> : userRowsError ? <div className="form-error" role="alert">{userRowsError}. Deploy list-platform-users and refresh.</div> : !userRows.length ? <div className="admin-empty">No users found.</div> : <div className="table-wrap"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Created</th><th>Last sign in</th></tr></thead><tbody>{userRows.map((row) => <tr key={String(row.id)}><td>{String(row.name ?? '—')}</td><td>{String(row.email ?? '—')}</td><td>{String(row.phone ?? '—')}</td><td><span className={`admin-status ${row.status === 'active' ? 'active' : ''}`}>{String(row.status ?? '—')}</span></td><td>{formatAdminValue('created_at', row.created_at)}</td><td>{row.last_sign_in_at ? formatAdminValue('last_sign_in_at', row.last_sign_in_at) : 'Never'}</td></tr>)}</tbody></table></div>}</section>
     if (section === 'Settings') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Admin settings</h2><p>Profile and environment-safe controls for this console.</p></div></div><div className="admin-settings"><div><span className="admin-card-label">Signed-in account</span><strong>{email}</strong></div><div><span className="admin-card-label">Access model</span><strong>Platform admin role + Supabase RLS</strong></div><div><span className="admin-card-label">Revenue</span><strong>Unavailable until billing is implemented</strong></div></div></section>
     if (section === 'Audit log') return <section className="admin-card wide"><div className="admin-card-header"><div><h2>Audit log</h2><p>Unified activity from Supabase platform controls, project business records, and the connected GitHub repository.</p></div><span className="admin-pill success">{auditLoading ? 'Loading activity' : `${auditEntries.length} events`}</span></div>{auditError ? <div className="form-error" role="alert">{auditError}. Deploy list-platform-audit and refresh.</div> : auditLoading ? <div className="admin-table-skeleton">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="admin-skeleton-row"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>)}</div> : !auditEntries.length ? <div className="admin-empty">No audit activity found.</div> : <div className="table-wrap"><table className="admin-table audit-table"><thead><tr><th>Source</th><th>Action</th><th>Actor</th><th>Target</th><th>Organization</th><th>When</th></tr></thead><tbody>{auditEntries.map((entry) => <tr key={`${entry.source}-${entry.id}`}><td><span className={`audit-source ${entry.source.toLowerCase().replace(' ', '-')}`}>{entry.source}</span></td><td><strong>{entry.action}</strong></td><td>{entry.actor ?? 'System'}</td><td>{entry.target}</td><td>{entry.organizationId ?? '—'}</td><td>{formatAdminValue('created_at', entry.createdAt)}</td></tr>)}</tbody></table></div>}</section>
-    if (section === 'Notifications') return <><section className="admin-card wide"><div className="admin-card-header"><div><h2>Send broadcast</h2><p>Creates an audited admin notification record. Fan-out to user notifications requires the server-side delivery function.</p></div></div><form className="admin-form" onSubmit={sendNotification}><label>Title<input required value={notificationTitle} onChange={(event) => setNotificationTitle(event.target.value)} placeholder="Scheduled maintenance" /></label><label>Message<textarea required value={notificationMessage} onChange={(event) => setNotificationMessage(event.target.value)} placeholder="Write the message users should receive." /></label><button className="primary" type="submit">Save broadcast</button>{notificationStatus && <p className="muted" role="status">{notificationStatus}</p>}</form></section><section className="admin-card wide"><div className="admin-card-header"><div><h2>Notification history</h2><p>Records from the shared admin notification table.</p></div></div>{renderRows()}</section></>
+    if (section === 'Notifications') return <><section className="admin-card wide"><div className="admin-card-header"><div><h2>Send broadcast</h2><p>Broadcasts are authorized, fanned out to user notification centers, and audited by the database.</p></div></div><form className="admin-form" onSubmit={sendNotification}><label>Title<input required value={notificationTitle} onChange={(event) => setNotificationTitle(event.target.value)} placeholder="Scheduled maintenance" /></label><label>Message<textarea required value={notificationMessage} onChange={(event) => setNotificationMessage(event.target.value)} placeholder="Write the message users should receive." /></label><button className="primary" type="submit">Send broadcast</button>{notificationStatus && <p className="muted" role="status">{notificationStatus}</p>}</form></section><section className="admin-card wide"><div className="admin-card-header"><div><h2>Notification history</h2><p>Broadcasts recorded in the platform audit trail.</p></div></div>{renderRows()}</section></>
     return <section className="admin-card wide"><div className="admin-card-header"><div><h2>{section}</h2><p>Live records from the shared Supabase backend.</p></div><button className="secondary" onClick={() => setSection('Overview')}>Back to overview</button></div>{renderRows()}</section>
   }
   const toggleSidebar = () => {
@@ -429,14 +421,14 @@ function AuthScreen() {
     let result
     if (mode === 'sign-up') {
       result = await supabase.auth.signUp({ email: identifier, password, options: { data: { full_name: fullName.trim() } } })
-    } else if (accountMode === 'owner' || identifier.includes('@')) {
+    } else if (accountMode === 'owner') {
       result = await supabase.auth.signInWithPassword({ email: identifier, password })
     } else if (!supabaseUrl || !supabaseAnonKey) {
       setError('Worker sign-in is not configured.')
       setBusy(false)
       return
     } else {
-      const response = await fetch(`${supabaseUrl}/functions/v1/resolve-worker-login`, { method: 'POST', headers: { apikey: supabaseAnonKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ employeeId: identifier, password }) })
+      const response = await fetch(`${supabaseUrl}/functions/v1/resolve-worker-login`, { method: 'POST', headers: { apikey: supabaseAnonKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload?.access_token || !payload?.refresh_token) {
         setError(payload?.error ?? 'Invalid worker credentials')
@@ -492,7 +484,8 @@ function Workspace({ email, displayName }: { email: string; displayName: string 
     getCurrentUserContext(supabase).then((context) => {
       if (cancelled) return
       const available = context.memberships.flatMap((membership) => membership.organization ? [{ id: membership.organization.id, name: membership.organization.name }] : [])
-      const selected = available[0]
+      const storedId = window.localStorage.getItem(`zerobyte.organization.${context.userId}`)
+      const selected = available.find((organization) => organization.id === storedId) ?? available[0]
       const membership = context.memberships.find((item) => item.organization_id === selected?.id)
       setOrganizations(available); setRole(membership?.role ?? 'member'); setUserId(context.userId)
       setMustChangePassword(Boolean(context.employee?.must_change_password))
@@ -510,11 +503,26 @@ function Workspace({ email, displayName }: { email: string; displayName: string 
     const next = organizations.find((organization) => organization.id === nextId)
     if (!next) return
     setOrgId(next.id); setOrgName(next.name); setView('Overview')
+    if (userId) window.localStorage.setItem(`zerobyte.organization.${userId}`, next.id)
   }
   const toggleSidebar = () => { const next = !collapsed; setCollapsed(next); window.localStorage.setItem('zerobyte.sidebar-collapsed', String(next)) }
   const visibleGroups = workerMode ? navGroups.map((group) => ({ ...group, items: group.items.filter((item) => ['Overview', 'Sales', 'Customers', 'Receipts', 'Workforce'].includes(item.name)) })).filter((group) => group.items.length) : navGroups
   const offlineScope: OfflineScope | null = userId && orgId ? { userId, organizationId: orgId } : null
-  return <div className={`${dark ? 'app' : 'app light'}${collapsed ? ' sidebar-collapsed' : ''}`}><OfflineStatus scope={offlineScope} /><aside className={open ? 'sidebar open' : 'sidebar'}><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>{workerMode ? 'Worker' : 'Business'}</small><button className="close-nav" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div><div className="workspace-select"><div className="workspace-icon">{orgName.slice(0, 2).toUpperCase()}</div><select className="workspace-switcher" aria-label="Select organization" value={orgId} onChange={(event) => switchOrganization(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></div>{workerMode && <div className="role-badge"><ShieldCheck size={13} /><span>Staff workspace</span></div>}<nav>{visibleGroups.map((group) => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.items.map(({ name, icon: Icon }) => <button className={view === name ? 'nav-item active' : 'nav-item'} key={name} onClick={() => { setView(name as View); setOpen(false) }}><Icon size={17} /><span>{name}</span></button>)}</div>)}</nav>{!workerMode && <div className="sidebar-bottom"><button className={view === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setView('Settings')}><Settings size={17} /><span>Settings</span></button></div>}<button className="user" onClick={async () => { await clearOfflineUserData(userId ?? ''); await supabase?.auth.signOut() }}><div className="avatar">{(displayName || email).slice(0, 2).toUpperCase()}</div><div><strong>{displayName || email}</strong><span>{displayName ? email : 'Sign out'}</span></div></button><button className="sidebar-collapse" onClick={toggleSidebar} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>{collapsed ? 'Expand menu' : 'Collapse menu'}</span></button></aside><main className="main"><header className="topbar"><button className="menu-btn" onClick={() => setOpen(true)} aria-label="Open menu"><Menu size={21} /></button><div className="breadcrumb"><span>{orgName}</span><ChevronRight size={14} /><strong>{view}</strong></div><div className="top-actions"><div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your business..." /></div><button className="icon-btn" aria-label="Help"><CircleHelp size={19} /></button><button className="icon-btn" aria-label="Notifications"><Bell size={19} /></button><button className="theme-toggle" onClick={() => setDark(!dark)}>{dark ? 'Light' : 'Dark'} mode</button></div></header><div className="content">{view === 'Overview' ? <Dashboard orgId={orgId} scope={offlineScope} onNavigate={setView} workerMode={workerMode} displayName={displayName} /> : <FeatureView view={view} orgId={orgId} search={search} scope={offlineScope} />}</div></main></div>
+  const signOut = async () => {
+    if (!userId) return
+    if (offlineScope) {
+      if (navigator.onLine && supabase) await syncOfflineQueue(supabase, offlineScope)
+      const pending = await readOfflineOperations(offlineScope)
+      if (pending.length) {
+        const keep = window.confirm(`There are ${pending.length} unsynced change${pending.length === 1 ? '' : 's'} on this device. Press OK to keep them for the next sign-in, or Cancel to choose whether to discard them.`)
+        if (!keep && !window.confirm('Discarding these changes is permanent. Confirm discard?')) return
+        if (!keep) await discardOfflineUserData(userId)
+      }
+    }
+    await clearOfflineUserData(userId)
+    await supabase?.auth.signOut()
+  }
+  return <div className={`${dark ? 'app' : 'app light'}${collapsed ? ' sidebar-collapsed' : ''}`}><OfflineStatus scope={offlineScope} /><aside className={open ? 'sidebar open' : 'sidebar'}><div className="brand"><div className="brand-mark">ø</div><span>Zerøbyte</span><small>{workerMode ? 'Worker' : 'Business'}</small><button className="close-nav" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div><div className="workspace-select"><div className="workspace-icon">{orgName.slice(0, 2).toUpperCase()}</div><select className="workspace-switcher" aria-label="Select organization" value={orgId} onChange={(event) => switchOrganization(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></div>{workerMode && <div className="role-badge"><ShieldCheck size={13} /><span>Staff workspace</span></div>}<nav>{visibleGroups.map((group) => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.items.map(({ name, icon: Icon }) => <button className={view === name ? 'nav-item active' : 'nav-item'} key={name} onClick={() => { setView(name as View); setOpen(false) }}><Icon size={17} /><span>{name}</span></button>)}</div>)}</nav>{!workerMode && <div className="sidebar-bottom"><button className={view === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setView('Settings')}><Settings size={17} /><span>Settings</span></button></div>}<button className="user" onClick={() => void signOut()}><div className="avatar">{(displayName || email).slice(0, 2).toUpperCase()}</div><div><strong>{displayName || email}</strong><span>{displayName ? email : 'Sign out'}</span></div></button><button className="sidebar-collapse" onClick={toggleSidebar} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>{collapsed ? 'Expand menu' : 'Collapse menu'}</span></button></aside><main className="main"><header className="topbar"><button className="menu-btn" onClick={() => setOpen(true)} aria-label="Open menu"><Menu size={21} /></button><div className="breadcrumb"><span>{orgName}</span><ChevronRight size={14} /><strong>{view}</strong></div><div className="top-actions"><div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your business..." /></div><button className="icon-btn" aria-label="Help"><CircleHelp size={19} /></button><button className="icon-btn" aria-label="Notifications"><Bell size={19} /></button><button className="theme-toggle" onClick={() => setDark(!dark)}>{dark ? 'Light' : 'Dark'} mode</button></div></header><div className="content">{view === 'Overview' ? <Dashboard orgId={orgId} scope={offlineScope} onNavigate={setView} workerMode={workerMode} displayName={displayName} /> : <FeatureView view={view} orgId={orgId} search={search} scope={offlineScope} />}</div></main></div>
 }
 
 function WorkspaceSetup({ email, onCreated }: { email: string; onCreated: (id: string, name: string) => void }) {
@@ -524,25 +532,35 @@ function WorkspaceSetup({ email, onCreated }: { email: string; onCreated: (id: s
 }
 
 function Dashboard({ orgId, scope, onNavigate, workerMode = false, displayName = '' }: { orgId: string; scope: OfflineScope | null; onNavigate: (view: View) => void; workerMode?: boolean; displayName?: string }) {
-  const [products, setProducts] = useState<ProductRow[]>([]); const [customers, setCustomers] = useState<CustomerRow[]>([]); const [sales, setSales] = useState<{ id: string; total: number; created_at: string }[]>([]); const [expenses, setExpenses] = useState<{ amount: number }[]>([])
+  const [products, setProducts] = useState<ProductRow[]>([]); const [customers, setCustomers] = useState<CustomerRow[]>([]); const [sales, setSales] = useState<{ id: string; total: number; created_at: string }[]>([]); const [metrics, setMetrics] = useState<{ revenue: number; cogs: number; gross_profit: number; operating_expenses: number; net_profit: number; sales_count: number } | null>(null)
+  const [dashboardError, setDashboardError] = useState('')
   useEffect(() => {
     let active = true
     if (scope) void Promise.all([readScopedCache<ProductRow>(scope, 'products'), readScopedCache<CustomerRow>(scope, 'customers'), readScopedCache<{ id: string; total: number; created_at: string }>(scope, 'recent-sales')]).then(([cachedProducts, cachedCustomers, cachedSales]) => { if (active) { setProducts(cachedProducts); setCustomers(cachedCustomers); setSales(cachedSales) } })
     if (!supabase || !navigator.onLine) return () => { active = false }
-    void Promise.all([supabase.from('products').select('id,name,sku,stock,price').eq('organization_id', orgId).order('created_at', { ascending: false }), supabase.from('customers').select('id,name,email,phone').eq('organization_id', orgId).order('created_at', { ascending: false }), supabase.from('sales').select('id,total,created_at').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(6), supabase.from('expenses').select('amount').eq('organization_id', orgId)]).then(async ([p, c, s, e]) => { if (!active) return; setProducts(p.data ?? []); setCustomers(c.data ?? []); setSales(s.data ?? []); setExpenses(e.data ?? []); if (scope) { if (p.data) await writeScopedCache(scope, 'products', p.data); if (c.data) await writeScopedCache(scope, 'customers', c.data); if (s.data) await writeScopedCache(scope, 'recent-sales', s.data) } })
+    const dateTo = new Date().toISOString().slice(0, 10)
+    const dateFrom = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10)
+    void Promise.all([
+      supabase.from('products').select('id,name,sku,stock,price').eq('organization_id', orgId).order('created_at', { ascending: false }),
+      supabase.from('customers').select('id,name,email,phone').eq('organization_id', orgId).order('created_at', { ascending: false }),
+      supabase.from('sales').select('id,total,created_at').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(20),
+      workerMode ? Promise.resolve(null) : supabase.rpc('get_dashboard_metrics', { target_org: orgId, date_from: dateFrom, date_to: dateTo, target_branch: null }),
+    ]).then(async ([p, c, s, m]) => {
+      if (!active) return
+      setProducts(p.data ?? []); setCustomers(c.data ?? []); setSales(s.data ?? [])
+      if (m?.error) {
+        setMetrics(null)
+        setDashboardError(m.error.code === 'PGRST202' ? 'Dashboard reports are not available yet. Apply the latest Supabase migrations, then try again.' : 'Dashboard metrics are temporarily unavailable.')
+      } else {
+        setDashboardError('')
+        setMetrics((m?.data ?? null) as typeof metrics)
+      }
+      if (scope) { if (p.data) await writeScopedCache(scope, 'products', p.data); if (c.data) await writeScopedCache(scope, 'customers', c.data); if (s.data) await writeScopedCache(scope, 'recent-sales', s.data) }
+    })
     return () => { active = false }
-  }, [orgId, scope])
-  const revenue = sales.reduce((sum, row) => sum + Number(row.total), 0); const cost = expenses.reduce((sum, row) => sum + Number(row.amount), 0); const low = products.filter((product) => product.stock <= 5)
-  return <div className="page"><div className="welcome-strip"><div><span className="auth-kicker">Today in {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' })}</span><h1>{displayName ? `Welcome back, ${displayName}.` : workerMode ? 'Your shift, in view.' : 'Your business, in view.'}</h1><p className="muted">{workerMode ? 'The tasks and sales you need for today.' : 'A clear read on what needs your attention next.'}</p></div><button className="primary" onClick={() => onNavigate('Sales')}><Plus size={17} /> Record a sale</button></div><div className="metrics">{!workerMode && <><Metric label="Revenue" value={`₦${revenue.toLocaleString('en-NG')}`} note={`${sales.length} recent sale${sales.length === 1 ? '' : 's'}`} /><Metric label="Expenses" value={`₦${cost.toLocaleString('en-NG')}`} note="Recorded in this workspace" /></>}<Metric label="Products" value={products.length.toString()} note={products.length ? `${low.length} need attention` : 'Add your first product'} /><Metric label="Customers" value={customers.length.toString()} note={customers.length ? 'In your records' : 'Add your first customer'} /></div>{!workerMode && <DashboardChart sales={sales} />}<div className="dashboard-grid"><section className="panel spotlight"><div className="panel-heading"><div><span className="section-label">{workerMode ? 'Staff focus' : 'Next best action'}</span><h2>{workerMode ? 'Serve customers with confidence.' : products.length ? 'Keep your records moving.' : 'Start with your catalog.'}</h2></div><ShieldCheck size={20} color="#06b6d4" /></div><p>{workerMode ? 'Record sales, select customers, and keep receipts ready. Stock and financial controls stay with managers.' : products.length ? 'Your workspace is connected. Add customers and record sales to make your reports useful.' : 'Add the products you sell so sales, stock and receipts can work from the same source of truth.'}</p><div className="action-row"><button className="secondary" onClick={() => onNavigate('Sales')}><ShoppingCart size={16} /> Record sale</button><button className="secondary" onClick={() => onNavigate('Customers')}><Users size={16} /> Find customer</button></div></section><section className="panel"><div className="panel-heading"><div><span className="section-label">Attention</span><h2>Low stock</h2></div><button className="text-btn" onClick={() => onNavigate('Sales')}>Open sales <ArrowRight size={14} /></button></div>{low.length ? low.slice(0, 4).map((product) => <div className="list-row" key={product.id}><span className="row-icon"><Package size={15} /></span><div><strong>{product.name}</strong><small>{product.sku}</small></div><b className="warning-text">{product.stock} left</b></div>) : <div className="quiet-empty">{workerMode ? 'Stock alerts are managed by your manager.' : <><Check size={16} /> No low-stock products yet.</>}</div>}</section></div><section className="panel activity-panel"><div className="panel-heading"><div><span className="section-label">Live activity</span><h2>Recent sales</h2></div><button className="text-btn" onClick={() => onNavigate('Sales')}>View sales <ArrowRight size={14} /></button></div>{sales.length ? sales.map((sale) => <div className="list-row" key={sale.created_at}><span className="row-icon sale"><ShoppingCart size={15} /></span><div><strong>Completed sale</strong><small>{new Date(sale.created_at).toLocaleString('en-NG')}</small></div><b>{workerMode ? 'Recorded' : `₦${Number(sale.total).toLocaleString('en-NG')}`}</b></div>) : <div className="quiet-empty">No sales recorded yet. Your first completed sale will appear here.</div>}</section></div>
-}
-
-function DashboardChart({ sales }: { sales: { total: number; created_at: string }[] }) {
-  const points = Array.from({ length: 7 }, (_, index) => {
-    const day = new Date(); day.setHours(0, 0, 0, 0); day.setDate(day.getDate() - (6 - index))
-    return sales.filter((sale) => new Date(sale.created_at).toDateString() === day.toDateString()).reduce((sum, sale) => sum + Number(sale.total), 0)
-  })
-  const max = Math.max(...points, 1)
-  return <section className="panel dashboard-chart"><div className="panel-heading"><div><span className="section-label">Revenue trend</span><h2>Last 7 days</h2></div><span className="muted">Live records</span></div><div className="chart-bars">{points.map((point, index) => <div className="chart-bar-column" key={index}><span className="chart-bar-value">{point ? `₦${point.toLocaleString('en-NG')}` : '—'}</span><div className="chart-bar-track"><i style={{ height: `${Math.max(point ? 8 : 3, point / max * 100)}%` }} /></div><small>{new Intl.DateTimeFormat('en-NG', { weekday: 'short' }).format(new Date(Date.now() - (6 - index) * 86400000))}</small></div>)}</div></section>
+  }, [orgId, scope, workerMode])
+  const low = products.filter((product) => product.stock <= 5)
+  return <div className="page"><div className="welcome-strip"><div><span className="auth-kicker">Last 30 days · {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' })}</span><h1>{displayName ? `Welcome back, ${displayName}.` : workerMode ? 'Your shift, in view.' : 'Your business, in view.'}</h1><p className="muted">{workerMode ? 'The tasks and sales you need for today.' : 'A clear read on what needs your attention next.'}</p></div><button className="primary" onClick={() => onNavigate('Sales')}><Plus size={17} /> Record a sale</button></div>{dashboardError && !workerMode && <div className="form-error" role="alert">{dashboardError}</div>}<div className="metrics">{!workerMode && <><Metric label="Revenue" value={`₦${Number(metrics?.revenue ?? 0).toLocaleString('en-NG')}`} note={`${metrics?.sales_count ?? 0} completed sales`} /><Metric label="COGS" value={`₦${Number(metrics?.cogs ?? 0).toLocaleString('en-NG')}`} note="Historical cost basis" /><Metric label="Gross profit" value={`₦${Number(metrics?.gross_profit ?? 0).toLocaleString('en-NG')}`} note="Revenue less COGS" /><Metric label="Net profit" value={`₦${Number(metrics?.net_profit ?? 0).toLocaleString('en-NG')}`} note="After operating expenses" /></>}<Metric label="Products" value={products.length.toString()} note={products.length ? `${low.length} need attention` : 'Add your first product'} /><Metric label="Customers" value={customers.length.toString()} note={customers.length ? 'In your records' : 'Add your first customer'} /></div><div className="dashboard-grid"><section className="panel spotlight"><div className="panel-heading"><div><span className="section-label">{workerMode ? 'Staff focus' : 'Next best action'}</span><h2>{workerMode ? 'Serve customers with confidence.' : products.length ? 'Keep your records moving.' : 'Start with your catalog.'}</h2></div><ShieldCheck size={20} color="#06b6d4" /></div><p>{workerMode ? 'Record sales, select customers, and keep receipts ready. Stock and financial controls stay with managers.' : products.length ? 'Your workspace is connected. Add customers and record sales to make your reports useful.' : 'Add the products you sell so sales, stock and receipts can work from the same source of truth.'}</p><div className="action-row"><button className="secondary" onClick={() => onNavigate('Sales')}><ShoppingCart size={16} /> Record sale</button><button className="secondary" onClick={() => onNavigate('Customers')}><Users size={16} /> Find customer</button></div></section><section className="panel"><div className="panel-heading"><div><span className="section-label">Attention</span><h2>Low stock</h2></div><button className="text-btn" onClick={() => onNavigate('Sales')}>Open sales <ArrowRight size={14} /></button></div>{low.length ? low.slice(0, 4).map((product) => <div className="list-row" key={product.id}><span className="row-icon"><Package size={15} /></span><div><strong>{product.name}</strong><small>{product.sku}</small></div><b className="warning-text">{product.stock} left</b></div>) : <div className="quiet-empty">{workerMode ? 'Stock alerts are managed by your manager.' : <><Check size={16} /> No low-stock products yet.</>}</div>}</section></div><section className="panel activity-panel"><div className="panel-heading"><div><span className="section-label">Live activity</span><h2>Recent sales</h2></div><button className="text-btn" onClick={() => onNavigate('Sales')}>View sales <ArrowRight size={14} /></button></div>{sales.length ? sales.map((sale) => <div className="list-row" key={sale.created_at}><span className="row-icon sale"><ShoppingCart size={15} /></span><div><strong>Completed sale</strong><small>{new Date(sale.created_at).toLocaleString('en-NG')}</small></div><b>{workerMode ? 'Recorded' : `₦${Number(sale.total).toLocaleString('en-NG')}`}</b></div>) : <div className="quiet-empty">No sales recorded yet. Your first completed sale will appear here.</div>}</section></div>
 }
 
 function Metric({ label, value, note }: { label: string; value: string; note: string }) { return <div className="metric"><span>{label}</span><strong>{value}</strong><small>{note}</small></div> }
@@ -559,9 +577,7 @@ function FeatureView({ view, orgId, search, scope }: { view: View; orgId: string
   if (view === 'Workforce') return <Workforce orgId={orgId} />
   if (view === 'User Accounts') return <UserAccounts orgId={orgId} />
   if (view === 'Settings') return <SettingsPage orgId={orgId} />
-  const titles: Record<string, [string, string]> = { Receipts: ['Receipts', 'Receipts generated from completed sales.'], Invoices: ['Invoices', 'Create and track invoices for your customers.'], Reports: ['Reports', 'A considered view of your real business activity.'], Settings: ['Settings', 'Business profile and workspace preferences.'] }
-  const [title, subtitle] = titles[view]
-  return <div className="page"><div className="page-heading"><div><span className="section-label">{view}</span><h1>{title}</h1><p className="muted">{subtitle}</p></div></div><section className="panel product-placeholder"><div className="empty-icon"><Settings /></div><h2>{title} is ready.</h2><p>This section is connected to your business workspace. Keep building your records here.</p><button className="secondary" onClick={() => window.alert('This workflow is connected to Supabase and ready for the next record type.')}>Learn about this workflow <ArrowRight size={14} /></button></section></div>
+  return null
 }
 
 function Branches({ orgId }: { orgId: string }) {
@@ -580,11 +596,40 @@ function Workforce({ orgId }: { orgId: string }) {
   const [attendance, setAttendance] = useState<{ id: string; work_date: string; clocked_in_at: string | null; clocked_out_at: string | null } | null>(null)
   const [form, setForm] = useState({ employee_id: '', full_name: '', email: '', phone: '', job_title: '', hired_on: new Date().toISOString().slice(0, 10), monthly_salary: '', branch_id: '' })
   const [error, setError] = useState(''); const [temporaryPassword, setTemporaryPassword] = useState(''); const [copyState, setCopyState] = useState('')
-  const load = useCallback(() => { if (!supabase) return; Promise.all([supabase.from('employee_profiles').select('id,employee_id,full_name,email,phone,job_title,employment_status,monthly_salary,branch_id,hired_on,user_id').eq('organization_id', orgId).order('created_at', { ascending: false }), supabase.from('branches').select('id,name').eq('organization_id', orgId).eq('status', 'active').order('name'), getCurrentUserContext(supabase)]).then(([people, branchResult, context]) => { setRows(people.data ?? []); setBranches(branchResult.data ?? []); const own = people.data?.find((person) => person.user_id === context.userId); setSelf(own ? { id: own.id, full_name: own.full_name, branch_id: own.branch_id } : null) }).catch((reason: Error) => setError(reason.message)) }, [orgId])
+  const load = useCallback(async () => {
+    if (!supabase) return
+    try {
+      const context = await getCurrentUserContext(supabase)
+      const peopleQuery = context.employee
+        ? supabase.from('employee_profiles_self').select('id,employee_id,full_name,email,phone,job_title,employment_status,branch_id,hired_on,user_id').eq('organization_id', orgId)
+        : supabase.from('employee_profiles_manager').select('id,employee_id,full_name,email,phone,job_title,employment_status,monthly_salary,branch_id,hired_on,user_id').eq('organization_id', orgId)
+      const [people, branchResult] = await Promise.all([
+        peopleQuery.order('created_at', { ascending: false }),
+        supabase.from('branches').select('id,name').eq('organization_id', orgId).eq('status', 'active').order('name'),
+      ])
+      if (people.error) throw people.error
+      const rowsWithSafeSalary = (people.data ?? []).map((person) => ({
+        ...person,
+        monthly_salary: Number((person as { monthly_salary?: number | null }).monthly_salary ?? 0) || null,
+      }))
+      setRows(rowsWithSafeSalary as typeof rows)
+      setBranches(branchResult.data ?? [])
+      const own = rowsWithSafeSalary.find((person) => person.user_id === context.userId)
+      setSelf(own ? { id: own.id, full_name: own.full_name, branch_id: own.branch_id } : null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not load workforce records.')
+    }
+  }, [orgId])
   useEffect(() => { load() }, [load])
   useEffect(() => { if (!supabase || !self) return; supabase.from('attendance').select('id,work_date,clocked_in_at,clocked_out_at').eq('employee_id', self.id).eq('work_date', new Date().toISOString().slice(0, 10)).maybeSingle().then(({ data }) => setAttendance(data)) }, [self])
   async function add(event: React.FormEvent) { event.preventDefault(); if (!supabase) return; setError(''); setTemporaryPassword(''); const { data: sessionData } = await supabase.auth.getSession(); if (!sessionData.session) { setError('Your owner session has expired. Sign in again.'); return } const { data: payload, error: invokeError } = await supabase.functions.invoke('provision-worker', { body: { organizationId: orgId, employeeId: form.employee_id.trim(), fullName: form.full_name.trim(), email: form.email.trim(), phone: form.phone.trim() || null, jobTitle: form.job_title.trim() || null, hiredOn: form.hired_on || null, monthlySalary: form.monthly_salary || null, branchId: form.branch_id || null } }); if (invokeError) { let detail = invokeError.message; try { const context = (invokeError as { context?: Response }).context; if (context) { const body = await context.clone().json() as { error?: string }; detail = body.error ?? detail } } catch { /* Keep the function error when the response is not JSON. */ } setError(detail || 'Could not create the worker account.'); return } setTemporaryPassword((payload as { temporaryPassword: string }).temporaryPassword); setCopyState(''); setForm({ employee_id: '', full_name: '', email: '', phone: '', job_title: '', hired_on: new Date().toISOString().slice(0, 10), monthly_salary: '', branch_id: '' }); load() }
-  async function archive(id: string) { if (!supabase) return; const { error: result } = await supabase.from('employee_profiles').update({ employment_status: 'archived' }).eq('id', id).eq('organization_id', orgId); if (result) setError(result.message); else load() }
+  async function archive(id: string) {
+    if (!supabase) return
+    setError('')
+    const { error: result } = await supabase.functions.invoke('deactivate-worker', { body: { organizationId: orgId, employeeId: id } })
+    if (result) setError(result.message)
+    else load()
+  }
   async function clock(kind: 'in' | 'out') { if (!supabase || !self) return; const result = kind === 'in' ? await supabase.from('attendance').insert({ organization_id: orgId, employee_id: self.id, branch_id: self.branch_id, work_date: new Date().toISOString().slice(0, 10), clocked_in_at: new Date().toISOString(), status: 'present' }) : await supabase.from('attendance').update({ clocked_out_at: new Date().toISOString() }).eq('id', attendance?.id ?? ''); if (result.error) setError(result.error.message); else load() }
   if (self) return <div className="page"><PageIntro label="Workforce" title={`Your shift, ${self.full_name}.`} description="Attendance is part of your worker profile and stays scoped to your assigned branch." /><section className="panel record-form three"><div><span className="section-label">Today</span><strong>{attendance?.clocked_in_at ? `Clocked in at ${new Date(attendance.clocked_in_at).toLocaleTimeString('en-NG')}` : 'Not clocked in yet'}</strong></div><button className="primary" disabled={Boolean(attendance?.clocked_in_at)} onClick={() => clock('in')}><Check size={16} /> Clock in</button><button className="secondary" disabled={!attendance?.clocked_in_at || Boolean(attendance.clocked_out_at)} onClick={() => clock('out')}>Clock out</button>{error && <div className="form-error">{error}</div>}</section></div>
   return <div className="page"><PageIntro label="Workforce" title="Keep your team in view." description="Create the employee record and secure application account together. The temporary password is shown once." /><form className="panel record-form three" onSubmit={add}><label>Employee ID<input required value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })} placeholder="EMP-001" /></label><label>Full name<input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="Employee name" /></label><label>Email address<input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="worker@business.com" /></label><label>Phone number<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+234..." /></label><label>Job role/title<input value={form.job_title} onChange={(e) => setForm({ ...form, job_title: e.target.value })} placeholder="Sales associate" /></label><label>Branch<select required value={form.branch_id} onChange={(e) => setForm({ ...form, branch_id: e.target.value })}><option value="">Select branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><label>Hire date<input required type="date" value={form.hired_on} onChange={(e) => setForm({ ...form, hired_on: e.target.value })} /></label><label>Monthly salary<input type="number" min="0" value={form.monthly_salary} onChange={(e) => setForm({ ...form, monthly_salary: e.target.value })} placeholder="Optional" /></label><button className="primary"><Plus size={16} /> Create worker account</button>{error && <div className="form-error">{error}</div>}</form>{temporaryPassword && <section className="panel temporary-password"><h2>Worker account created</h2><p>Copy this temporary password now. It is not stored and will not be shown again.</p><code>{temporaryPassword}</code><button className="secondary" onClick={() => { void navigator.clipboard?.writeText(temporaryPassword); setCopyState('Copied') }}>{copyState || 'Copy temporary password'}</button></section>}<section className="panel table-panel">{rows.length ? <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Contact</th><th>Role</th><th>Branch</th><th>Status</th><th /></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.full_name}</strong><small className="table-sub">{row.employee_id}</small></td><td>{row.email || '—'}<small className="table-sub">{row.phone || ''}</small></td><td>{row.job_title || '—'}</td><td>{branches.find((branch) => branch.id === row.branch_id)?.name || '—'}</td><td><span className={`status ${row.employment_status === 'archived' ? 'refunded' : 'completed'}`}>{row.employment_status}</span></td><td>{row.employment_status !== 'archived' && <button className="text-btn" type="button" onClick={() => archive(row.id)}>Deactivate</button>}</td></tr>)}</tbody></table></div> : <EmptyInline title="No employees yet" text="Create the first worker account above." />}</section></div>
@@ -595,9 +640,10 @@ function UserAccounts({ orgId }: { orgId: string }) {
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
   const [error, setError] = useState('')
   async function setStatus(id: string, status: string) {
-    if (!supabase) return
-    const { error: result } = await supabase.from('employee_profiles').update({ employment_status: status }).eq('id', id).eq('organization_id', orgId)
-    if (result) setError(result.message); else setRows((current) => current.map((row) => row.id === id ? { ...row, employment_status: status } : row))
+    if (!supabase || status !== 'archived') return
+    const { error: result } = await supabase.functions.invoke('deactivate-worker', { body: { organizationId: orgId, employeeId: id } })
+    if (result) setError(result.message)
+    else setRows((current) => current.map((row) => row.id === id ? { ...row, employment_status: 'archived' } : row))
   }
   useEffect(() => {
     if (!supabase) return
@@ -606,7 +652,7 @@ function UserAccounts({ orgId }: { orgId: string }) {
       supabase.from('branches').select('id,name').eq('organization_id', orgId),
     ]).then(([accounts, branchResult]) => { if (accounts.error) setError(accounts.error.message); setRows(accounts.data ?? []); setBranches(branchResult.data ?? []) })
   }, [orgId])
-  return <div className="page"><PageIntro label="User accounts" title="Know who can sign in." description="Organization accounts are linked to employee records. Platform administrator accounts remain separate and are never managed here." />{error && <div className="form-error" role="alert">{error}</div>}<section className="panel table-panel">{rows.length ? <div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Employee ID</th><th>Role</th><th>Branch</th><th>Status</th><th>Created</th><th /></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.full_name}</strong></td><td>{row.email || '—'}</td><td className="mono">{row.employee_id}</td><td>{row.job_title || 'Worker'}</td><td>{branches.find((branch) => branch.id === row.branch_id)?.name || '—'}</td><td><span className={`status ${row.employment_status === 'active' ? 'completed' : 'refunded'}`}>{row.employment_status}</span></td><td>{new Date(row.created_at).toLocaleDateString('en-NG')}</td><td><button className="text-btn" onClick={() => void setStatus(row.id, row.employment_status === 'active' ? 'archived' : 'active')}>{row.employment_status === 'active' ? 'Deactivate' : 'Reactivate'}</button></td></tr>)}</tbody></table></div> : <EmptyInline title="No linked accounts yet" text="Create a worker from Workforce to provision an account safely." />}</section></div>
+  return <div className="page"><PageIntro label="User accounts" title="Know who can sign in." description="Organization accounts are linked to employee records. Platform administrator accounts remain separate and are never managed here." />{error && <div className="form-error" role="alert">{error}</div>}<section className="panel table-panel">{rows.length ? <div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Employee ID</th><th>Role</th><th>Branch</th><th>Status</th><th>Created</th><th /></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.full_name}</strong></td><td>{row.email || '—'}</td><td className="mono">{row.employee_id}</td><td>{row.job_title || 'Worker'}</td><td>{branches.find((branch) => branch.id === row.branch_id)?.name || '—'}</td><td><span className={`status ${row.employment_status === 'active' ? 'completed' : 'refunded'}`}>{row.employment_status}</span></td><td>{new Date(row.created_at).toLocaleDateString('en-NG')}</td><td>{row.employment_status === 'active' && <button className="text-btn" onClick={() => void setStatus(row.id, 'archived')}>Deactivate</button>}</td></tr>)}</tbody></table></div> : <EmptyInline title="No linked accounts yet" text="Create a worker from Workforce to provision an account safely." />}</section></div>
 }
 
 type ReceiptRow = { id: string; receipt_number: string | null; total: number; payment_method: string; created_at: string; customer: { name: string; phone: string | null; email: string | null } | null; sale_items: { id: string; quantity: number; unit_price: number; line_total: number; products: { name: string; sku: string } | null }[] }
@@ -662,9 +708,23 @@ function Invoices({ orgId }: { orgId: string }) {
 }
 
 function Reports({ orgId }: { orgId: string }) {
-  const [sales, setSales] = useState(0); const [expenses, setExpenses] = useState(0); const [products, setProducts] = useState(0); const [customers, setCustomers] = useState(0)
-  useEffect(() => { if (!supabase) return; Promise.all([supabase.from('sales').select('total').eq('organization_id', orgId), supabase.from('expenses').select('amount').eq('organization_id', orgId), supabase.from('products').select('id', { count: 'exact', head: true }).eq('organization_id', orgId), supabase.from('customers').select('id', { count: 'exact', head: true }).eq('organization_id', orgId)]).then(([s, e, p, c]) => { setSales((s.data ?? []).reduce((sum, row) => sum + Number(row.total), 0)); setExpenses((e.data ?? []).reduce((sum, row) => sum + Number(row.amount), 0)); setProducts(p.count ?? 0); setCustomers(c.count ?? 0) }) }, [orgId])
-  return <div className="page"><PageIntro label="Reports" title="Understand the signal." description="A live summary of the activity your organization has recorded." /><div className="metrics"><Metric label="Sales revenue" value={`₦${sales.toLocaleString('en-NG')}`} note="From completed sales" /><Metric label="Expenses" value={`₦${expenses.toLocaleString('en-NG')}`} note="Recorded expenses" /><Metric label="Products" value={products.toString()} note="Catalog size" /><Metric label="Customers" value={customers.toString()} note="Customer records" /></div><section className="panel report-note"><BarChart3 size={22} color="#06b6d4" /><h2>Net movement</h2><strong>₦{(sales - expenses).toLocaleString('en-NG')}</strong><p>Calculated from your real sales and expense records.</p></section></div>
+  const [metrics, setMetrics] = useState<{ revenue: number; cogs: number; gross_profit: number; operating_expenses: number; net_profit: number; sales_count: number } | null>(null)
+  const [error, setError] = useState('')
+  const [dateFrom, setDateFrom] = useState(() => new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10))
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
+  useEffect(() => {
+    if (!supabase) return
+    setError('')
+    supabase.rpc('get_dashboard_metrics', { target_org: orgId, date_from: dateFrom, date_to: dateTo, target_branch: null }).then(({ data, error: result }) => {
+      if (result) {
+        setMetrics(null)
+        setError(result.code === 'PGRST202' ? 'Reports are not available yet. Apply the latest Supabase migrations, then try again.' : 'Reports are temporarily unavailable.')
+      } else {
+        setMetrics(data as typeof metrics)
+      }
+    })
+  }, [dateFrom, dateTo, orgId])
+  return <div className="page"><PageIntro label="Reports" title="Understand the signal." description="Server-side P&L aggregates. Historical item costs are used for COGS." /><section className="panel report-filters"><label>From<input type="date" value={dateFrom} max={dateTo} onChange={(event) => setDateFrom(event.target.value)} /></label><label>To<input type="date" value={dateTo} min={dateFrom} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setDateTo(event.target.value)} /></label></section>{error && <div className="form-error" role="alert">{error}</div>}<div className="metrics"><Metric label="Revenue" value={`₦${Number(metrics?.revenue ?? 0).toLocaleString('en-NG')}`} note="Completed sales" /><Metric label="COGS" value={`₦${Number(metrics?.cogs ?? 0).toLocaleString('en-NG')}`} note="Historical sale costs" /><Metric label="Gross profit" value={`₦${Number(metrics?.gross_profit ?? 0).toLocaleString('en-NG')}`} note="Revenue less COGS" /><Metric label="Operating expenses" value={`₦${Number(metrics?.operating_expenses ?? 0).toLocaleString('en-NG')}`} note="Recorded expenses" /></div><section className="panel report-note"><BarChart3 size={22} color="#06b6d4" /><h2>Net profit</h2><strong>₦{Number(metrics?.net_profit ?? 0).toLocaleString('en-NG')}</strong><p>Revenue minus historical COGS and operating expenses.</p></section></div>
 }
 
 function SettingsPage({ orgId }: { orgId: string }) {
@@ -680,12 +740,34 @@ function Inventory({ orgId, search }: { orgId: string; search: string }) {
   const [movements, setMovements] = useState<{ id: string; product_id: string; movement_type: string; quantity: number; created_at: string }[]>([])
   const load = useCallback(() => { if (!supabase) return; Promise.all([supabase.from('products').select('id,name,sku,stock,price,category').eq('organization_id', orgId).order('created_at', { ascending: false }), supabase.from('stock_movements').select('id,product_id,movement_type,quantity,created_at').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(20)]).then(([productResult, movementResult]) => { setRows(productResult.data ?? []); setMovements(movementResult.data ?? []) }) }, [orgId])
   useEffect(() => { load() }, [load])
-  async function add(event: React.FormEvent) { event.preventDefault(); if (!supabase) return; setError(''); const payload = { name: form.name, sku: form.sku, category: form.category || 'Uncategorized', price: Number(form.price), stock: Number(form.stock) }; const result = editing ? await supabase.from('products').update(payload).eq('id', editing).eq('organization_id', orgId) : await supabase.from('products').insert({ organization_id: orgId, ...payload }); if (result.error) setError(result.error.code === '23505' ? 'That SKU is already in use in this workspace.' : result.error.message); else { setForm({ name: '', sku: '', category: '', price: '', stock: '' }); setEditing(null); load() } }
+  async function add(event: React.FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setError('')
+    const openingStock = Number(form.stock)
+    const payload = { name: form.name, sku: form.sku, category: form.category || 'Uncategorized', price: Number(form.price) }
+    if (editing) {
+      const result = await supabase.from('products').update(payload).eq('id', editing).eq('organization_id', orgId)
+      if (result.error) setError(result.error.code === '23505' ? 'That SKU is already in use in this workspace.' : result.error.message)
+      else { setForm({ name: '', sku: '', category: '', price: '', stock: '' }); setEditing(null); load() }
+      return
+    }
+    const result = await supabase.from('products').insert({ organization_id: orgId, ...payload, stock: 0 }).select('id').single()
+    if (result.error || !result.data) {
+      setError(result.error?.code === '23505' ? 'That SKU is already in use in this workspace.' : result.error?.message ?? 'Could not create the product.')
+      return
+    }
+    if (openingStock > 0) {
+      const movement = await supabase.rpc('initialize_stock', { target_org: orgId, target_product: result.data.id, opening_quantity: openingStock })
+      if (movement.error) { setError(movement.error.message); return }
+    }
+    setForm({ name: '', sku: '', category: '', price: '', stock: '' }); load()
+  }
   async function remove(id: string) { if (!supabase || !window.confirm('Delete this product? This cannot be undone.')) return; const { error: result } = await supabase.from('products').delete().eq('id', id).eq('organization_id', orgId); if (result) setError(result.message); else load() }
   async function receiveStock(event: React.FormEvent) { event.preventDefault(); if (!navigator.onLine) { setError('Inventory receiving is online-only. Reconnect before adding stock.'); return } if (!supabase) return; const { error: result } = await supabase.rpc('receive_stock', { target_org: orgId, target_product: receive.productId, quantity_to_add: Number(receive.quantity), new_cost: receive.cost ? Number(receive.cost) : null, new_selling: receive.selling ? Number(receive.selling) : null, target_branch: null }); if (result) setError(result.message); else { setReceive({ productId: '', quantity: '', cost: '', selling: '' }); load() } }
   function edit(row: ProductRow) { setEditing(row.id); setForm({ name: row.name, sku: row.sku, category: row.category ?? '', price: String(row.price), stock: String(row.stock) }); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const filtered = rows.filter((row) => `${row.name} ${row.sku} ${row.category}`.toLowerCase().includes(search.toLowerCase()))
-  return <div className="page"><PageIntro label="Inventory" title="Know what is in stock." description="Edit mistakes, receive new stock into an existing SKU, and keep a traceable catalog." /><form className="panel record-form" onSubmit={add}><label>Product name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. 5kg Rice" /></label><label>SKU<input required value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="RICE-005" /></label><label>Category<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Groceries" /></label><label>Selling price<input required type="number" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="₦0.00" /></label><label>{editing ? 'Current stock' : 'Opening stock'}<input required type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="0" /></label><button className="primary"><Plus size={16} /> {editing ? 'Save product' : 'Add product'}</button>{editing && <button type="button" className="secondary" onClick={() => { setEditing(null); setForm({ name: '', sku: '', category: '', price: '', stock: '' }) }}>Cancel</button>}{error && <div className="form-error">{error}</div>}</form><form className="panel receive-form" onSubmit={receiveStock}><div className="receive-heading"><span className="section-label">Stock receiving · Online only</span><h2>Add stock without duplicating the product</h2><p>Stock receiving needs a live server transaction. Reconnect before receiving inventory.</p></div><label>Product<select required value={receive.productId} onChange={(e) => setReceive({ ...receive, productId: e.target.value })}><option value="">Choose product</option>{rows.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.stock} units</option>)}</select></label><label>Quantity<input required type="number" min="1" value={receive.quantity} onChange={(e) => setReceive({ ...receive, quantity: e.target.value })} /></label><label>New cost (optional)<input type="number" min="0" value={receive.cost} onChange={(e) => setReceive({ ...receive, cost: e.target.value })} placeholder="Keep current" /></label><label>New selling price (optional)<input type="number" min="0" value={receive.selling} onChange={(e) => setReceive({ ...receive, selling: e.target.value })} placeholder="Keep current" /></label><button className="secondary" disabled={!navigator.onLine}>Receive stock</button></form><section className="panel table-panel catalog-panel"><div className="panel-heading"><div><span className="section-label">Your catalog</span><h2>{rows.length} product{rows.length === 1 ? '' : 's'}</h2></div></div>{filtered.length ? <div className="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Price</th><th>Actions</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td><strong>{row.name}</strong></td><td className="mono">{row.sku}</td><td>{row.category}</td><td className={row.stock <= 5 ? 'warning-text' : ''}>{row.stock}</td><td className="amount">₦{Number(row.price).toLocaleString('en-NG')}</td><td><button type="button" className="text-btn" onClick={() => edit(row)}>Edit</button><button type="button" className="text-btn danger-text" onClick={() => remove(row.id)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyInline title="No products yet" text="Add your first product above. It will become available to sales and stock workflows." />}</section><section className="panel table-panel stock-history"><div className="panel-heading"><div><span className="section-label">Stock history</span><h2>Recent movements</h2></div></div>{movements.length ? <div className="table-wrap"><table><thead><tr><th>Product</th><th>Movement</th><th>Quantity</th><th>Date</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id}><td>{rows.find((row) => row.id === movement.product_id)?.name || 'Product'}</td><td><span className="status completed">{movement.movement_type}</span></td><td className={movement.quantity < 0 ? 'danger-text' : 'stock-low'}>{movement.quantity > 0 ? '+' : ''}{movement.quantity}</td><td>{new Date(movement.created_at).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No stock movements yet" text="Receiving stock and completing sales will create an auditable history here." />}</section></div>
+  return <div className="page"><PageIntro label="Inventory" title="Know what is in stock." description="Edit product details, receive new stock through a server transaction, and keep a traceable catalog." /><form className="panel record-form" onSubmit={add}><label>Product name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. 5kg Rice" /></label><label>SKU<input required value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="RICE-005" /></label><label>Category<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Groceries" /></label><label>Selling price<input required type="number" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="₦0.00" /></label>  <label>{editing ? 'Current stock (read-only)' : 'Opening stock'}<input required type="number" min="0" readOnly={Boolean(editing)} value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="0" /></label><button className="primary"><Plus size={16} /> {editing ? 'Save product' : 'Add product'}</button>{editing && <button type="button" className="secondary" onClick={() => { setEditing(null); setForm({ name: '', sku: '', category: '', price: '', stock: '' }) }}>Cancel</button>}{error && <div className="form-error">{error}</div>}</form><form className="panel receive-form" onSubmit={receiveStock}><div className="receive-heading"><span className="section-label">Stock receiving · Online only</span><h2>Add stock without duplicating the product</h2><p>Stock receiving needs a live server transaction. Reconnect before receiving inventory.</p></div><label>Product<select required value={receive.productId} onChange={(e) => setReceive({ ...receive, productId: e.target.value })}><option value="">Choose product</option>{rows.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.stock} units</option>)}</select></label><label>Quantity<input required type="number" min="1" value={receive.quantity} onChange={(e) => setReceive({ ...receive, quantity: e.target.value })} /></label><label>New cost (optional)<input type="number" min="0" value={receive.cost} onChange={(e) => setReceive({ ...receive, cost: e.target.value })} placeholder="Keep current" /></label><label>New selling price (optional)<input type="number" min="0" value={receive.selling} onChange={(e) => setReceive({ ...receive, selling: e.target.value })} placeholder="Keep current" /></label><button className="secondary" disabled={!navigator.onLine}>Receive stock</button></form><section className="panel table-panel catalog-panel"><div className="panel-heading"><div><span className="section-label">Your catalog</span><h2>{rows.length} product{rows.length === 1 ? '' : 's'}</h2></div></div>{filtered.length ? <div className="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Price</th><th>Actions</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td><strong>{row.name}</strong></td><td className="mono">{row.sku}</td><td>{row.category}</td><td className={row.stock <= 5 ? 'warning-text' : ''}>{row.stock}</td><td className="amount">₦{Number(row.price).toLocaleString('en-NG')}</td><td><button type="button" className="text-btn" onClick={() => edit(row)}>Edit</button><button type="button" className="text-btn danger-text" onClick={() => remove(row.id)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyInline title="No products yet" text="Add your first product above. It will become available to sales and stock workflows." />}</section><section className="panel table-panel stock-history"><div className="panel-heading"><div><span className="section-label">Stock history</span><h2>Recent movements</h2></div></div>{movements.length ? <div className="table-wrap"><table><thead><tr><th>Product</th><th>Movement</th><th>Quantity</th><th>Date</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id}><td>{rows.find((row) => row.id === movement.product_id)?.name || 'Product'}</td><td><span className="status completed">{movement.movement_type}</span></td><td className={movement.quantity < 0 ? 'danger-text' : 'stock-low'}>{movement.quantity > 0 ? '+' : ''}{movement.quantity}</td><td>{new Date(movement.created_at).toLocaleString('en-NG')}</td></tr>)}</tbody></table></div> : <EmptyInline title="No stock movements yet" text="Receiving stock and completing sales will create an auditable history here." />}</section></div>
 }
 
 function Customers({ orgId, search, scope }: { orgId: string; search: string; scope: OfflineScope | null }) {
@@ -740,20 +822,53 @@ function Sales({ orgId, scope }: { orgId: string; scope: OfflineScope | null }) 
     return () => { active = false }
   }, [orgId, scope])
   useEffect(() => { if (scope && draftLoaded) void saveSaleDraft(scope, { cart, customer }) }, [cart, customer, draftLoaded, scope])
-  function addToCart() { const item = products.find((product) => product.id === selected && product.stock > 0); const count = Number(quantity); if (!item) return; if (count < 1 || count > item.stock) { setMessage(`Only ${item.stock} units are available.`); return } setCart((current) => { const existing = current.find((line) => line.product_id === item.id); return existing ? current.map((line) => line.product_id === item.id ? { ...line, quantity: Math.min(item.stock, line.quantity + count) } : line) : [...current, { product_id: item.id, quantity: count }] }); setSelected(''); setQuantity('1'); setMessage('Item added to sale.') }
+  const selectedCustomer = customers.find((row) => row.id === customer)
+  const customerReady = Boolean(customer) && !selectedCustomer?.pending
+  const customerName = selectedCustomer?.name ?? 'Selected customer'
+  function addToCart() {
+    if (!customerReady) {
+      setMessage('Choose a customer before adding items.')
+      return
+    }
+    const item = products.find((product) => product.id === selected && product.stock > 0)
+    const count = Number(quantity)
+    if (!item) return
+    if (count < 1 || count > item.stock) { setMessage(`Only ${item.stock} units are available.`); return }
+    setCart((current) => {
+      const existing = current.find((line) => line.product_id === item.id)
+      return existing ? current.map((line) => line.product_id === item.id ? { ...line, quantity: Math.min(item.stock, line.quantity + count) } : line) : [...current, { product_id: item.id, quantity: count }]
+    })
+    setSelected('')
+    setQuantity('1')
+    setMessage('Item added to sale.')
+  }
+  function chooseCustomer(value: string) {
+    setCustomer(value)
+    setMessage(value ? 'Customer selected. Add products to this sale.' : '')
+  }
+  function changeCustomer() {
+    if (cart.length && !window.confirm('Changing the customer will clear every item in this sale. Continue?')) return
+    setCustomer('')
+    setSelected('')
+    setQuantity('1')
+    setCart([])
+    setMessage('Sale cleared. Choose a customer to begin again.')
+  }
   async function complete(event: React.FormEvent) {
-    event.preventDefault(); if (!supabase || !scope || !cart.length) return
+    event.preventDefault()
+    if (!customerReady) { setMessage('Choose a customer before completing the sale.'); return }
+    if (!supabase || !scope || !cart.length) return
     if (!navigator.onLine) {
-      await enqueueOfflineOperation(scope, 'sale', { target_org: orgId, target_customer: customer || null, items: cart, target_branch: null, target_payment_method: 'cash' })
+      await enqueueOfflineOperation(scope, 'sale', { target_org: orgId, target_customer: customer, items: cart, target_branch: null, target_payment_method: 'cash' })
       setMessage('Sale saved offline. It will sync when you reconnect and the server will re-check stock and totals.')
       const nextProducts = products.map((product) => { const line = cart.find((entry) => entry.product_id === product.id); return line ? { ...product, stock: product.stock - line.quantity } : product })
       setProducts(nextProducts); await writeScopedCache(scope, 'products', nextProducts)
       setCart([]); setCustomer(''); await clearSaleDraft(scope); return
     }
-    const { error } = await supabase.rpc('create_sale', { target_org: orgId, target_customer: customer || null, items: cart, target_branch: null, target_payment_method: 'cash' })
+    const { error } = await supabase.rpc('create_sale', { target_org: orgId, target_customer: customer, items: cart, target_branch: null, target_payment_method: 'cash' })
     if (error) {
       if (/network|fetch|offline|failed to send/i.test(error.message)) {
-        await enqueueOfflineOperation(scope, 'sale', { target_org: orgId, target_customer: customer || null, items: cart, target_branch: null, target_payment_method: 'cash' })
+        await enqueueOfflineOperation(scope, 'sale', { target_org: orgId, target_customer: customer, items: cart, target_branch: null, target_payment_method: 'cash' })
         setMessage('Connection lost. Sale saved offline and will sync automatically.')
         const nextProducts = products.map((product) => { const line = cart.find((entry) => entry.product_id === product.id); return line ? { ...product, stock: product.stock - line.quantity } : product })
         setProducts(nextProducts); await writeScopedCache(scope, 'products', nextProducts); setCart([]); setCustomer(''); await clearSaleDraft(scope)
@@ -761,7 +876,7 @@ function Sales({ orgId, scope }: { orgId: string; scope: OfflineScope | null }) 
     } else { setMessage('Sale completed and stock updated.'); const nextProducts = products.map((product) => { const line = cart.find((entry) => entry.product_id === product.id); return line ? { ...product, stock: product.stock - line.quantity } : product }); setProducts(nextProducts); await writeScopedCache(scope, 'products', nextProducts); setCart([]); setCustomer(''); await clearSaleDraft(scope) }
   }
   const total = cart.reduce((sum, line) => sum + (products.find((product) => product.id === line.product_id)?.price ?? 0) * line.quantity, 0)
-  return <div className="page"><PageIntro label="Sales" title="Build the sale, then confirm." description="Your cart is persisted as an offline draft. Offline sales are queued with an operation ID and revalidated by the server before stock changes." /><section className="sales-layout"><form className="panel sale-form" onSubmit={complete}><div className="sale-add-row"><label>Product<select value={selected} onChange={(e) => setSelected(e.target.value)}><option value="">Choose a product</option>{products.filter((product) => product.stock > 0).map((product) => <option key={product.id} value={product.id}>{product.name} · {product.stock} available</option>)}</select></label><label>Quantity<input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} /></label><button type="button" className="secondary" disabled={!selected} onClick={addToCart}><Plus size={16} /> Add item</button></div><label>Customer<select value={customer} onChange={(e) => setCustomer(e.target.value)}><option value="">Walk-in customer</option>{customers.filter((row) => !row.pending).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>{cart.length > 0 && <div className="sale-cart"><div className="section-label">Items in this sale</div>{cart.map((line) => { const product = products.find((entry) => entry.id === line.product_id); return <div className="sale-cart-row" key={line.product_id}><div><strong>{product?.name}</strong><small>{line.quantity} × ₦{Number(product?.price ?? 0).toLocaleString('en-NG')}</small></div><strong>₦{Number((product?.price ?? 0) * line.quantity).toLocaleString('en-NG')}</strong><button type="button" className="text-btn danger-text" onClick={() => setCart((current) => current.filter((entry) => entry.product_id !== line.product_id))}>Remove</button></div>})}</div>}<div className="sale-total"><span>Total</span><strong>₦{total.toLocaleString('en-NG')}</strong></div>{message && <div className="form-success">{message}</div>}<button className="primary" disabled={!cart.length}>Complete sale <ArrowRight size={16} /></button></form><section className="panel sale-note"><span className="section-label">Trusted calculation</span><h2>Stock changes on the server.</h2><p>Your browser never decides the final total or bypasses inventory checks. Online sales use the secure Supabase RPC; queued offline sales use an idempotent server operation when connectivity returns.</p></section></section></div>
+  return <div className="page"><PageIntro label="Sales" title="Build the sale, then confirm." description="Choose the customer once, add as many products as you need, and keep the draft safe until you submit." /><section className="sales-layout"><form className="panel sale-form" onSubmit={complete}><section className="sale-customer-step" aria-labelledby="sale-customer-heading"><div className="sale-step-heading"><span className="sale-step-badge">1</span><div><span className="section-label">Customer first</span><h2 id="sale-customer-heading">Who is this sale for?</h2></div></div>{!customer ? <><label htmlFor="sale-customer">Customer (required)<select id="sale-customer" required value={customer} onChange={(e) => chooseCustomer(e.target.value)}><option value="">Choose a customer</option>{customers.filter((row) => !row.pending).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><p className="field-help">Select the customer once. Their name stays attached while you add multiple products.</p>{cart.length > 0 && <div className="sale-draft-note"><UserRound size={15} /><span>This saved draft has {cart.length} item{cart.length === 1 ? '' : 's'}. Choose a customer to continue.</span></div>}</> : <div className="sale-customer-lock"><div className="sale-customer-identity"><span className="sale-step-badge sale-step-badge-complete"><Check size={14} /></span><div><strong>{customerName}</strong><small>{selectedCustomer?.pending ? 'Still syncing — choose another customer' : 'Selected for this sale'}</small></div></div><button type="button" className="secondary" onClick={changeCustomer}><Users size={16} /> Change customer</button></div>}</section>{customer && <section className={`sale-items-step ${!customerReady ? 'sale-items-step-disabled' : ''}`} aria-labelledby="sale-items-heading"><div className="sale-step-heading"><span className="sale-step-badge">2</span><div><span className="section-label">Item cart</span><h2 id="sale-items-heading">Add products for {customerName}</h2></div></div><div className="sale-add-row"><label>Product<select value={selected} disabled={!customerReady} onChange={(e) => setSelected(e.target.value)}><option value="">Choose a product</option>{products.filter((product) => product.stock > 0).map((product) => <option key={product.id} value={product.id}>{product.name} · {product.stock} available</option>)}</select></label><label>Quantity<input type="number" min="1" value={quantity} disabled={!customerReady} onChange={(e) => setQuantity(e.target.value)} /></label><button type="button" className="secondary" disabled={!selected || !customerReady} onClick={addToCart}><Plus size={16} /> Add item</button></div>{cart.length > 0 && <div className="sale-cart"><div className="section-label">Items in this sale</div>{cart.map((line) => { const product = products.find((entry) => entry.id === line.product_id); return <div className="sale-cart-row" key={line.product_id}><div><strong>{product?.name}</strong><small>{line.quantity} × ₦{Number(product?.price ?? 0).toLocaleString('en-NG')}</small></div><strong>₦{Number((product?.price ?? 0) * line.quantity).toLocaleString('en-NG')}</strong><button type="button" className="text-btn danger-text" onClick={() => setCart((current) => current.filter((entry) => entry.product_id !== line.product_id))}>Remove</button></div>})}</div>}<div className="sale-total"><span>Total</span><strong>₦{total.toLocaleString('en-NG')}</strong></div>{message && <div className="form-success" role="status" aria-live="polite">{message}</div>}<button className="primary" disabled={!cart.length || !customerReady}>Complete sale <ArrowRight size={16} /></button></section>}{!customer && message && <div className="form-success" role="status" aria-live="polite">{message}</div>}</form><section className="panel sale-note"><span className="section-label">Trusted calculation</span><h2>Stock changes on the server.</h2><p>Your browser never decides the final total or bypasses inventory checks. Online sales use the secure Supabase RPC; queued offline sales use an idempotent server operation when connectivity returns.</p></section></section></div>
 }
 
 function PageIntro({ label, title, description }: { label: string; title: string; description: string }) { return <div className="page-heading"><div><span className="section-label">{label}</span><h1>{title}</h1><p className="muted">{description}</p></div></div> }

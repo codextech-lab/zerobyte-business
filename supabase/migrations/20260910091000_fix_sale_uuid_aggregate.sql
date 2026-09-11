@@ -104,6 +104,7 @@ begin
   values (target_org, resolved_branch, target_customer, normalized_payment_method, calculated_total, auth.uid())
   returning id into new_sale_id;
 
+  perform set_config('app.inventory_mutation', 'on', true);
   for item in select * from jsonb_array_elements(items) loop
     item_product_id := (item->>'product_id')::uuid;
     item_quantity := (item->>'quantity')::integer;

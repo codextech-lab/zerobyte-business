@@ -11,12 +11,15 @@
     "check:env": "node scripts/check-env.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "supabase:push": "supabase db push",
+    "supabase:push": "supabase db push --linked --include-all",
     "supabase:functions:deploy": "supabase functions deploy create-sale --no-verify-jwt",
     "supabase:functions:deploy:admin": "supabase functions deploy list-platform-users --no-verify-jwt",
     "supabase:functions:deploy:worker": "supabase functions deploy provision-worker --no-verify-jwt",
     "supabase:functions:deploy:worker-login": "supabase functions deploy resolve-worker-login --no-verify-jwt",
-    "supabase:functions:deploy:audit": "supabase functions deploy list-platform-audit --no-verify-jwt"
+    "supabase:functions:deploy:audit": "supabase functions deploy list-platform-audit --no-verify-jwt",
+    "supabase:functions:deploy:deactivate-worker": "supabase functions deploy deactivate-worker --no-verify-jwt",
+    "supabase:functions:deploy:platform-records": "supabase functions deploy get-platform-records --no-verify-jwt",
+    "supabase:functions:deploy:hardened": "npm run supabase:functions:deploy && npm run supabase:functions:deploy:worker-login && npm run supabase:functions:deploy:deactivate-worker && npm run supabase:functions:deploy:platform-records"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",

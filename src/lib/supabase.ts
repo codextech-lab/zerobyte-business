@@ -17,5 +17,5 @@ export const supabase = createSupabaseClient()
 export const adminSupabase = createSupabaseClient('zerobyte-admin-auth')
 
 export function getDataMode() {
-  return isSupabaseConfigured ? 'Supabase configured · demo fixtures' : 'Local demo mode'
+  return isSupabaseConfigured ? 'Supabase connected' : 'Supabase configuration required'
 }
