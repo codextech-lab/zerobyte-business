@@ -32,16 +32,18 @@ export async function getCurrentUserContext(client: SupabaseClient) {
   const { data: userData, error: userError } = await client.auth.getUser()
   if (userError || !userData.user) throw userError ?? new Error('Your session has expired.')
   const user = userData.user
-  const { data: memberships, error: membershipError } = await client
-    .from('organization_members')
-    .select('organization_id,role,organizations(id,name)')
-    .eq('user_id', user.id)
+  const [{ data: memberships, error: membershipError }, { data: employee, error: employeeError }] = await Promise.all([
+    client
+      .from('organization_members')
+      .select('organization_id,role,organizations(id,name)')
+      .eq('user_id', user.id),
+    client
+      .from('employee_profiles')
+      .select('id,user_id,employee_id,full_name,email,phone,job_title,employment_status,hired_on,branch_id,must_change_password')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+  ])
   if (membershipError) throw membershipError
-  const { data: employee, error: employeeError } = await client
-    .from('employee_profiles')
-    .select('id,user_id,employee_id,full_name,email,phone,job_title,employment_status,hired_on,branch_id,must_change_password')
-    .eq('user_id', user.id)
-    .maybeSingle()
   if (employeeError) throw employeeError
   if (employee && employee.employment_status !== 'active') {
     await client.auth.signOut()

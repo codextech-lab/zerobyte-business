@@ -1,6 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap');
-
-:root { font-family: 'DM Sans', sans-serif; color: #f2f5f7; background: #0d1117; font-synthesis: none; }
+:root { font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; color: #f2f5f7; background: #0d1117; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 body { overflow-x: hidden; }
@@ -134,7 +132,7 @@ td { padding: 12px 10px; border-top: 1px solid #25303a; }
 .light td { border-color: #edf0f2; }
 td:first-child, th:first-child { padding-left: 0; }
 td:last-child, th:last-child { padding-right: 0; }
-.mono { font-family: 'DM Mono'; font-size: 10px; }
+.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 10px; }
 .amount { font-weight: 600; text-align: right; }
 .person { display: flex; align-items: center; gap: 8px; }
 .mini-avatar { width: 23px; height: 23px; display: grid; place-items: center; background: #263842; color: #c2d2da; border-radius: 50%; font-size: 8px; font-weight: 600; }

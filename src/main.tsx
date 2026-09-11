@@ -11,9 +11,11 @@ createRoot(document.getElementById('root')!).render(
 )
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
+  const registerWorker = () => {
     navigator.serviceWorker.register(appPath('/sw.js'), { scope: getBasePath() }).catch(() => {
       // The application remains fully usable when service workers are unavailable.
     })
-  })
+  }
+  if ('requestIdleCallback' in window) window.requestIdleCallback(registerWorker, { timeout: 2500 })
+  else globalThis.setTimeout(registerWorker, 1200)
 }

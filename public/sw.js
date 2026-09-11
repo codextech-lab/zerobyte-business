@@ -50,11 +50,16 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  event.respondWith(fetch(event.request).then((response) => {
-    if (response.ok && ['script', 'style', 'font', 'image'].includes(event.request.destination)) {
-      const copy = response.clone()
-      void caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
-    }
-    return response
-  }).catch(() => caches.match(event.request)))
+  const cacheableAsset = ['script', 'style', 'font', 'image'].includes(event.request.destination)
+  if (cacheableAsset) {
+    event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
+      if (response.ok) {
+        const copy = response.clone()
+        void caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
+      }
+      return response
+    })))
+    return
+  }
+  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)))
 })
