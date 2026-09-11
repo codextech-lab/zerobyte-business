@@ -31,7 +31,7 @@ serve(async (request) => {
   const { data: { user: caller } } = await callerClient.auth.getUser()
   if (!caller) return json({ error: 'Unauthorized' }, 401)
 
-  let body: { organizationId?: string; employeeId?: string }
+  let body: { organizationId?: string; employeeId?: string; action?: 'ban' | 'unban' }
   try {
     body = await request.json()
   } catch {
@@ -39,6 +39,7 @@ serve(async (request) => {
   }
   const organizationId = String(body.organizationId ?? '').trim()
   const employeeId = String(body.employeeId ?? '').trim()
+  const action = body.action === 'unban' ? 'unban' : 'ban'
   if (!organizationId || !employeeId) return json({ error: 'Organization and employee are required' }, 400)
 
   const admin = createClient(supabaseUrl, serviceRoleKey, {
@@ -62,28 +63,36 @@ serve(async (request) => {
     .maybeSingle()
   if (employeeError) return json({ error: 'Could not load the worker profile' }, 500)
   if (!employee) return json({ error: 'Worker profile not found' }, 404)
-  if (employee.employment_status === 'archived') return json({ ok: true })
+  if (action === 'ban' && employee.employment_status === 'archived') return json({ ok: true })
+  if (action === 'unban' && employee.employment_status === 'active') return json({ ok: true })
 
   if (employee.user_id) {
-    const { error: banError } = await admin.auth.admin.updateUserById(employee.user_id, { ban_duration: '876000h' })
+    const { error: banError } = await admin.auth.admin.updateUserById(employee.user_id, { ban_duration: action === 'ban' ? '876000h' : 'none' })
     if (banError) return json({ error: 'Could not revoke the worker sign-in' }, 502)
-    await admin.from('branch_members').delete().eq('user_id', employee.user_id)
+    if (action === 'ban') await admin.from('branch_members').delete().eq('user_id', employee.user_id)
   }
 
   const { error: updateError } = await admin
     .from('employee_profiles')
-    .update({ employment_status: 'archived', updated_at: new Date().toISOString() })
+    .update({ employment_status: action === 'ban' ? 'archived' : 'active', updated_at: new Date().toISOString() })
     .eq('id', employee.id)
     .eq('organization_id', organizationId)
   if (updateError) return json({ error: 'Could not archive the worker profile' }, 500)
 
+  if (action === 'unban' && employee.user_id) {
+    const { data: restoredEmployee } = await admin.from('employee_profiles').select('branch_id').eq('id', employee.id).single()
+    if (restoredEmployee?.branch_id) {
+      await admin.from('branch_members').upsert({ branch_id: restoredEmployee.branch_id, user_id: employee.user_id })
+    }
+  }
+
   await admin.from('audit_logs').insert({
     organization_id: organizationId,
     actor_id: caller.id,
-    action: 'worker.deactivated',
+    action: action === 'ban' ? 'worker.banned' : 'worker.unbanned',
     entity_type: 'employee_profile',
     entity_id: employee.id,
-    metadata: { auth_identity_revoked: Boolean(employee.user_id) },
+    metadata: { auth_identity_revoked: Boolean(employee.user_id), action },
   })
   return json({ ok: true })
 })

@@ -26,6 +26,7 @@ For a fresh checkout, copy `.env.example` to `.env.local`, add the project URL a
    supabase functions deploy provision-worker --no-verify-jwt
    supabase functions deploy resolve-worker-login --no-verify-jwt
    supabase functions deploy list-platform-audit --no-verify-jwt
+   supabase functions deploy manage-platform-user --no-verify-jwt
    ```
 4. Configure the environment variables in your local or hosted environment.
 5. Set `VITE_ADMIN_EMAILS` to the approved platform admin addresses for the dedicated admin console route.
@@ -42,6 +43,8 @@ npm run supabase:functions:deploy
 ```
 
 `supabase status` may report a Docker warning on machines without Docker; that only affects local Supabase containers. Remote migration push and Edge Function deployment do not require starting the local stack.
+
+Platform administrators can ban or unban Auth users from the Admin Console. Organization owners can ban or unban staff from Workforce or User Accounts; banning revokes sign-in and branch access, while unbanning restores the active employee status and assigned branch membership. These actions are handled by authenticated Edge Functions and written to the relevant audit log.
 
 The schema is organization-scoped, uses RLS policies for member access, records sale mutations in `audit_logs`, provides notifications and entitlements tables, and performs inventory-safe sale creation through a transactional Postgres function. The repo also includes a platform-admin console schema (`platform_admin_access`, `admin_audit_logs`, `admin_notifications`) with clear separation from business roles. Keep service-role credentials server-side; this client only uses the publishable anon key.
 
