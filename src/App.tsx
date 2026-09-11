@@ -308,7 +308,7 @@ function AdminConsole({ email, onBack, onLogout }: { email: string; onBack: () =
     })
   }, [analyticsPeriod])
   useEffect(() => {
-    if (!adminSupabase || section === 'Overview' || section === 'Settings' || section === 'Users' || section === 'Audit log') return
+    if (!adminSupabase || section === 'Overview' || section === 'Settings' || section === 'Users' || section === 'Audit log' || section === 'Monitoring') return
     const client = adminSupabase
     setRowsLoading(true)
     setRowsError('')
