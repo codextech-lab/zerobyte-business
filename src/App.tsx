@@ -15,7 +15,7 @@ import { appPath, appRoute, navigateTo } from './lib/routing'
 
 const navGroups = [
   { label: 'Run the business', items: [{ name: 'Overview', icon: LayoutDashboard }, { name: 'Sales', icon: ShoppingCart }, { name: 'Inventory', icon: Package }, { name: 'Customers', icon: Users }] },
-  { label: 'Keep records', items: [{ name: 'Receipts', icon: Receipt }, { name: 'Invoices', icon: FileText }, { name: 'Records', icon: ClipboardList }, { name: 'Reports', icon: BarChart3 }] },
+  { label: 'Keep records', items: [{ name: 'Receipts', icon: Receipt }, { name: 'Invoices', icon: FileText }, { name: 'Expenses', icon: Wallet }, { name: 'Records', icon: ClipboardList }, { name: 'Reports', icon: BarChart3 }] },
   { label: 'People & places', items: [{ name: 'Branches', icon: LayoutDashboard }, { name: 'Workforce', icon: Users }, { name: 'User Accounts', icon: ShieldCheck }] },
 ]
 type ProductRow = { id: string; name: string; sku: string; stock: number; price: number; category?: string }
